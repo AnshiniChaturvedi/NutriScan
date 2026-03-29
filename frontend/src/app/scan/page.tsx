@@ -67,7 +67,7 @@ export default function ScanPage() {
 
         {/* Hint chips */}
         <div className="flex flex-wrap justify-center gap-2 mt-8 relative z-10">
-          {['EAN-13', 'EAN-8', 'UPC-A', 'UPC-E', 'Manual input'].map(t => (
+          {['EAN-13', 'EAN-8', 'UPC-A', 'UPC-E', 'Manual input', 'Image upload'].map(t => (
             <span key={t} className="px-3 py-1 rounded-full glass text-slate-500 text-xs border border-white/5">
               {t}
             </span>

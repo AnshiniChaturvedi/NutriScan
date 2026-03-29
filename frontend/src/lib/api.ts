@@ -1,15 +1,34 @@
 import axios from 'axios';
 import type { AnalyzeResponse, Product, RecommendationItem } from './types';
 
-// Call FastAPI directly.  CORS is configured on the backend to allow localhost:3000.
-// NEXT_PUBLIC_API_URL is set in .env.local to http://127.0.0.1:8000
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
+// Frontend calls local Next.js API routes, which bridge directly to Python ML.
+const BASE_URL = '';
 
 const api = axios.create({
   baseURL: BASE_URL,
   timeout: 30000,
   headers: { 'Content-Type': 'application/json' },
 });
+
+function toApiErrorMessage(payload: unknown, fallback: string): string {
+  if (!payload || typeof payload !== 'object') {
+    return fallback;
+  }
+  const maybe = payload as Record<string, unknown>;
+  if (typeof maybe.error === 'string' && maybe.error.trim()) {
+    return maybe.error;
+  }
+  if (typeof maybe.detail === 'string' && maybe.detail.trim()) {
+    return maybe.detail;
+  }
+  return fallback;
+}
+
+function isAnalyzeResponse(payload: unknown): payload is AnalyzeResponse {
+  if (!payload || typeof payload !== 'object') return false;
+  const obj = payload as Record<string, unknown>;
+  return !!obj.product && typeof obj.product === 'object';
+}
 
 /**
  * Fetch basic product details by barcode (no ML analysis).
@@ -32,7 +51,10 @@ export async function analyzeFood(query: string): Promise<AnalyzeResponse> {
   const body = isBarcode
     ? { barcode: query.trim() }
     : { product_name: query.trim() };
-  const { data } = await api.post<AnalyzeResponse>('/api/analyze-food', body);
+  const { data } = await api.post('/api/analyze-food', body);
+  if (!isAnalyzeResponse(data)) {
+    throw new Error(toApiErrorMessage(data, 'Invalid analysis response from server.'));
+  }
   return data;
 }
 
@@ -48,6 +70,24 @@ export async function getRecommendations(barcode: string): Promise<Recommendatio
   } catch {
     return [];
   }
+}
+
+/**
+ * Analyze a food product from an uploaded image.
+ * The image may show a barcode OR a nutrition/ingredients label.
+ */
+export async function analyzeFromImage(file: File): Promise<AnalyzeResponse> {
+  const formData = new FormData();
+  formData.append('image', file);
+  const { data } = await axios.post(
+    '/api/analyze-image',
+    formData,
+    { timeout: 60000 },
+  );
+  if (!isAnalyzeResponse(data)) {
+    throw new Error(toApiErrorMessage(data, 'Image analysis failed.'));
+  }
+  return data;
 }
 
 // ─── Color Helpers ───────────────────────────────────────────────────────────

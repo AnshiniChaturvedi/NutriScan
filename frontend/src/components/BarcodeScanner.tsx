@@ -3,22 +3,35 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Camera, X, CheckCircle, AlertCircle, Keyboard, RefreshCw } from 'lucide-react';
+import { Camera, X, CheckCircle, AlertCircle, Keyboard, RefreshCw, ImageIcon, Upload } from 'lucide-react';
+import { analyzeFromImage } from '@/lib/api';
 
 interface BarcodeScannerProps {
   onClose?: () => void;
 }
+
+type Mode = 'camera' | 'manual' | 'upload';
 
 export default function BarcodeScanner({ onClose }: BarcodeScannerProps) {
   const router        = useRouter();
   const scannerRef    = useRef<{ stop: () => Promise<void> } | null>(null);
   const mountedRef    = useRef(false);
   const startingRef   = useRef(false); // guard against StrictMode double-invoke
+  const dropRef       = useRef<HTMLDivElement>(null);
 
   const [status,     setStatus]    = useState<'idle' | 'starting' | 'scanning' | 'success' | 'error'>('idle');
   const [errorMsg,   setErrorMsg]  = useState('');
-  const [manualMode, setManualMode] = useState(false);
+  const [mode,       setMode]      = useState<Mode>('camera');
   const [manualCode, setManualCode] = useState('');
+
+  // Upload-tab state
+  const [uploadFile,    setUploadFile]    = useState<File | null>(null);
+  const [uploadPreview, setUploadPreview] = useState<string | null>(null);
+  const [uploadStatus,  setUploadStatus]  = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [uploadError,   setUploadError]   = useState('');
+  const [isDragging,    setIsDragging]    = useState(false);
+
+  const manualMode = mode === 'manual';
 
   const navigateTo = useCallback((input: string) => {
     const cleaned = input.trim();
@@ -92,13 +105,13 @@ export default function BarcodeScanner({ onClose }: BarcodeScannerProps) {
 
   useEffect(() => {
     mountedRef.current = true;
-    if (!manualMode) startScanner();
+    if (mode === 'camera') startScanner();
     return () => {
       mountedRef.current = false;
       stopScanner();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [manualMode]);
+  }, [mode]);
 
   const handleManualSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -107,30 +120,85 @@ export default function BarcodeScanner({ onClose }: BarcodeScannerProps) {
     navigateTo(cleaned);
   };
 
+  const handleFileSelect = (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      setUploadError('Please select an image file (JPEG, PNG, WebP, etc.).');
+      return;
+    }
+    setUploadFile(file);
+    setUploadError('');
+    setUploadStatus('idle');
+    const url = URL.createObjectURL(file);
+    setUploadPreview(url);
+  };
+
+  const handleUploadSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!uploadFile || uploadStatus === 'loading') return;
+    setUploadStatus('loading');
+    setUploadError('');
+    try {
+      const result = await analyzeFromImage(uploadFile);
+      // Store result so dashboard can display it without a second API call.
+      try { sessionStorage.setItem('nutriscan_image_result', JSON.stringify(result)); } catch (_) {}
+      setUploadStatus('success');
+      setTimeout(() => {
+        if (mountedRef.current) router.push('/dashboard?image=1');
+      }, 600);
+    } catch (err: unknown) {
+      setUploadStatus('error');
+      let msg = 'Image analysis failed. Please try a different image.';
+      if (err && typeof err === 'object' && 'response' in err) {
+        const axiosErr = err as { response?: { data?: { detail?: string }; status?: number } };
+        if (axiosErr.response?.data?.detail) {
+          msg = axiosErr.response.data.detail;
+        } else if (axiosErr.response?.status === 422) {
+          msg = 'Could not extract food info from image. Make sure it clearly shows a barcode or nutrition label.';
+        }
+      }
+      setUploadError(msg);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) handleFileSelect(file);
+  };
+
   return (
     <div className="flex flex-col items-center gap-6 w-full max-w-md mx-auto">
       {/* Mode toggle */}
       <div className="flex gap-2 p-1 glass rounded-xl">
         <button
-          onClick={() => { setManualMode(false); setStatus('idle'); }}
-          className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-            !manualMode ? 'bg-green-500 text-black shadow-glow' : 'text-slate-400 hover:text-white'
+          onClick={() => { setMode('camera'); setStatus('idle'); }}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+            mode === 'camera' ? 'bg-green-500 text-black shadow-glow' : 'text-slate-400 hover:text-white'
           }`}
         >
           <Camera size={15} /> Camera
         </button>
         <button
-          onClick={() => { setManualMode(true); stopScanner(); }}
-          className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-            manualMode ? 'bg-blue-500 text-white shadow-glow-blue' : 'text-slate-400 hover:text-white'
+          onClick={() => { setMode('manual'); stopScanner(); }}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+            mode === 'manual' ? 'bg-blue-500 text-white shadow-glow-blue' : 'text-slate-400 hover:text-white'
           }`}
         >
           <Keyboard size={15} /> Manual
         </button>
+        <button
+          onClick={() => { setMode('upload'); stopScanner(); }}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+            mode === 'upload' ? 'bg-purple-500 text-white' : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <ImageIcon size={15} /> Upload
+        </button>
       </div>
 
       <AnimatePresence mode="wait">
-        {!manualMode ? (
+        {mode === 'camera' ? (
           <motion.div
             key="camera"
             initial={{ opacity: 0, scale: 0.95 }}
@@ -207,7 +275,7 @@ export default function BarcodeScanner({ onClose }: BarcodeScannerProps) {
                         <RefreshCw size={13} /> Try Again
                       </button>
                       <button
-                        onClick={() => { setManualMode(true); stopScanner(); }}
+                        onClick={() => { setMode('manual'); stopScanner(); }}
                         className="flex items-center gap-1.5 px-4 py-2 rounded-lg glass text-slate-300 text-sm font-medium"
                       >
                         <Keyboard size={13} /> Manual
@@ -222,7 +290,7 @@ export default function BarcodeScanner({ onClose }: BarcodeScannerProps) {
               Hold the barcode horizontally in the centre of the frame
             </p>
           </motion.div>
-        ) : (
+        ) : mode === 'manual' ? (
           <motion.div
             key="manual"
             initial={{ opacity: 0, y: 10 }}
@@ -258,7 +326,108 @@ export default function BarcodeScanner({ onClose }: BarcodeScannerProps) {
               </p>
             </div>
           </motion.div>
-        )}
+        ) : mode === 'upload' ? (
+          /* ── Upload tab ────────────────────────────────────────────── */
+          <motion.div
+            key="upload"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="w-full"
+          >
+            <div className="glass rounded-2xl p-6 flex flex-col gap-5 border border-white/10">
+              <div className="text-center">
+                <p className="text-white font-semibold text-lg">Upload a Photo</p>
+                <p className="text-slate-400 text-sm mt-1">
+                  Photo of a <span className="text-purple-400 font-medium">barcode</span> or&nbsp;
+                  <span className="text-purple-400 font-medium">nutrition label</span>
+                </p>
+              </div>
+
+              <form onSubmit={handleUploadSubmit} className="flex flex-col gap-4">
+                {/* Drop zone */}
+                <div
+                  ref={dropRef}
+                  onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
+                  onDragLeave={() => setIsDragging(false)}
+                  onDrop={handleDrop}
+                  onClick={() => document.getElementById('image-file-input')?.click()}
+                  className={`relative cursor-pointer rounded-xl border-2 border-dashed transition-all duration-200 flex flex-col items-center justify-center gap-3 overflow-hidden
+                    ${isDragging ? 'border-purple-400 bg-purple-500/10' : 'border-white/15 hover:border-purple-400/60 hover:bg-white/5'}
+                    ${uploadPreview ? 'p-0' : 'py-10 px-4'}`}
+                  style={{ minHeight: uploadPreview ? 200 : undefined }}
+                >
+                  <input
+                    id="image-file-input"
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={e => { const f = e.target.files?.[0]; if (f) handleFileSelect(f); }}
+                  />
+                  {uploadPreview ? (
+                    /* Image preview */
+                    <>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={uploadPreview}
+                        alt="preview"
+                        className="w-full rounded-xl object-contain max-h-64"
+                      />
+                      <div className="absolute inset-0 flex items-end justify-center pb-3 opacity-0 hover:opacity-100 transition-opacity bg-gradient-to-t from-black/60 to-transparent rounded-xl">
+                        <span className="text-xs text-white font-medium">Click to change image</span>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="w-14 h-14 rounded-2xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center">
+                        <Upload size={24} className="text-purple-400" />
+                      </div>
+                      <div className="text-center">
+                        <p className="text-slate-300 text-sm font-medium">
+                          Drag &amp; drop or <span className="text-purple-400">click to browse</span>
+                        </p>
+                        <p className="text-slate-600 text-xs mt-1">JPEG · PNG · WebP · HEIC</p>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Error message */}
+                {(uploadError || uploadStatus === 'error') && (
+                  <div className="flex items-start gap-2 p-3 rounded-xl bg-red-500/10 border border-red-500/20">
+                    <AlertCircle size={15} className="text-red-400 mt-0.5 flex-shrink-0" />
+                    <p className="text-red-300 text-xs leading-relaxed">{uploadError || 'Analysis failed.'}</p>
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={!uploadFile || uploadStatus === 'loading' || uploadStatus === 'success'}
+                  className="w-full py-3.5 rounded-xl bg-gradient-to-r from-purple-500 to-pink-500 text-white font-bold text-base disabled:opacity-40 hover:scale-[1.02] transition-all duration-200 flex items-center justify-center gap-2"
+                >
+                  {uploadStatus === 'loading' ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                      Analysing image…
+                    </>
+                  ) : uploadStatus === 'success' ? (
+                    <>
+                      <CheckCircle size={16} /> Redirecting…
+                    </>
+                  ) : (
+                    <>
+                      <ImageIcon size={16} /> Analyse Image
+                    </>
+                  )}
+                </button>
+              </form>
+
+              <p className="text-center text-slate-600 text-xs">
+                AI reads barcodes and nutrition/ingredients labels
+              </p>
+            </div>
+          </motion.div>
+        ) : null}
       </AnimatePresence>
 
       {onClose && (

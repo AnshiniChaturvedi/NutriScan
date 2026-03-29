@@ -19,6 +19,20 @@ import axios from 'axios';
 import { analyzeFood, getRecommendations } from '@/lib/api';
 import { AnalyzeResponse, RecommendationItem } from '@/lib/types';
 
+function isAnalyzeResponse(value: unknown): value is AnalyzeResponse {
+  if (!value || typeof value !== 'object') return false;
+  const obj = value as Record<string, unknown>;
+  return !!obj.product && typeof obj.product === 'object';
+}
+
+function getApiErrorMessage(value: unknown, fallback: string): string {
+  if (!value || typeof value !== 'object') return fallback;
+  const obj = value as Record<string, unknown>;
+  if (typeof obj.error === 'string' && obj.error.trim()) return obj.error;
+  if (typeof obj.detail === 'string' && obj.detail.trim()) return obj.detail;
+  return fallback;
+}
+
 function SkeletonCard({ className = '' }: { className?: string }) {
   return (
     <div className={`glass rounded-2xl p-6 animate-pulse ${className}`}>
@@ -33,11 +47,12 @@ function SkeletonCard({ className = '' }: { className?: string }) {
 }
 
 function DashboardContent() {
-  const params  = useSearchParams();
-  const barcode = params.get('barcode') ?? '';
-  const name    = params.get('name') ?? '';
+  const params     = useSearchParams();
+  const barcode    = params.get('barcode') ?? '';
+  const name       = params.get('name') ?? '';
+  const imageMode  = params.get('image') === '1';
   // Use barcode if provided, otherwise use product name
-  const query   = barcode || name;
+  const query      = barcode || name;
 
   const [data,  setData]  = useState<AnalyzeResponse | null>(null);
   const [recs,  setRecs]  = useState<RecommendationItem[]>([]);
@@ -45,6 +60,27 @@ function DashboardContent() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Image-upload path: result was stored in sessionStorage before navigation.
+    if (imageMode) {
+      try {
+        const cached = sessionStorage.getItem('nutriscan_image_result');
+        if (cached) {
+          const parsed = JSON.parse(cached) as unknown;
+          if (isAnalyzeResponse(parsed)) {
+            setData(parsed);
+          } else {
+            setError(getApiErrorMessage(parsed, 'Image analysis did not return product data. Please try another image.'));
+          }
+        } else {
+          setError('Image analysis result not found. Please upload an image again.');
+        }
+      } catch {
+        setError('Failed to load image analysis result.');
+      }
+      setLoading(false);
+      return;
+    }
+
     if (!query) {
       setError('No product provided.');
       setLoading(false);
@@ -58,6 +94,9 @@ function DashboardContent() {
       setError('');
       try {
         const result = await analyzeFood(query);
+        if (!isAnalyzeResponse(result)) {
+          throw new Error('Invalid analysis response from server.');
+        }
         if (!cancelled) {
           setData(result);
           // Cache for ChatWrapper to consume without an extra API call
@@ -71,15 +110,17 @@ function DashboardContent() {
         if (!cancelled) {
           let msg = 'Failed to analyse product.';
           if (axios.isAxiosError(err)) {
-            if (err.response?.status === 404) {
-              msg = `Product "${query}" not found. Try a different name or barcode.`;
+            if (err.response?.status === 404 || err.response?.data?.error?.includes('not found')) {
+              msg = `Product "${query}" not found in database. Try searching with a different product name or barcode number.`;
             } else if (err.response?.status === 422) {
               msg = 'Invalid input. Please enter a valid product name or barcode.';
             } else if (!err.response) {
-              msg = 'Cannot connect to the server. Make sure the backend is running on port 8000.';
+              msg = 'Cannot connect to the local ML API. Make sure the Next.js frontend dev server is running.';
             } else {
               msg = `Server error (${err.response.status}). Please try again.`;
             }
+          } else if (err instanceof Error && err.message.includes('Product not found')) {
+            msg = `Product "${query}" not found in OpenFoodFacts database. Try a different product name.`;
           }
           setError(msg);
         }
@@ -90,7 +131,7 @@ function DashboardContent() {
 
     load();
     return () => { cancelled = true; };
-  }, [query]);
+  }, [query, imageMode]);
 
   /* ── Loading state ─────────────────────── */
   if (loading) {
@@ -121,7 +162,7 @@ function DashboardContent() {
   }
 
   /* ── Error state ───────────────────────── */
-  if (error || !data) {
+  if (error || !data || !data.product) {
     return (
       <div className="max-w-xl mx-auto px-4 py-20 flex flex-col items-center text-center gap-6">
         <AlertCircle size={48} className="text-red-400" />
@@ -174,18 +215,25 @@ function DashboardContent() {
           </h1>
           <p className="text-slate-500 text-sm mt-0.5">
             {product.brand && <span className="mr-3">{product.brand}</span>}
-            <span className="font-mono text-slate-600">{barcode}</span>
+            {product.barcode !== 'image-upload' && (
+              <span className="font-mono text-slate-600">{barcode || product.barcode}</span>
+            )}
+            {product.barcode === 'image-upload' && (
+              <span className="text-purple-400/70 text-xs">Analysed from image</span>
+            )}
           </p>
         </div>
-        <a
-          href={`https://world.openfoodfacts.org/product/${encodeURIComponent(barcode)}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-300 transition-colors flex-shrink-0"
-        >
-          <ExternalLink size={13} />
-          OpenFoodFacts
-        </a>
+        {product.barcode !== 'image-upload' && (
+          <a
+            href={`https://world.openfoodfacts.org/product/${encodeURIComponent(barcode || product.barcode)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-300 transition-colors flex-shrink-0"
+          >
+            <ExternalLink size={13} />
+            OpenFoodFacts
+          </a>
+        )}
       </div>
 
       {/* Row 1: Gauge + Nutrition + Disease Risks */}

@@ -1,4 +1,6 @@
 import asyncio
+import json
+import re
 from typing import Dict, Optional
 
 import google.generativeai as genai
@@ -132,9 +134,9 @@ async def explain_ingredients(
     candidate_models = [
         _resolved_model_name,
         settings.GEMINI_MODEL,
-        "gemini-1.5-flash",
-        "gemini-pro",
-        "models/gemini-1.5-flash",
+        "models/gemini-2.0-flash",
+        "models/gemini-flash-latest",
+        "models/gemini-2.0-flash-lite",
     ]
 
     prompt = _build_ingredient_prompt(
@@ -166,4 +168,80 @@ async def explain_ingredients(
         "LLM ingredient explanation is temporarily unavailable "
         f"(reason: {reason}). Numeric scores are still valid."
     )
+
+
+async def analyze_food_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
+    """
+    Use Gemini Vision to analyze a food product image.
+
+    The image can contain:
+      - A barcode → returns {"type": "barcode", "value": "..."}
+      - A nutrition/ingredients label → returns {"type": "nutrition", ...}
+      - Neither → returns {"type": "unknown", "message": "..."}
+      - On error → returns {"type": "error", "message": "..."}
+    """
+    settings = get_settings()
+    if not settings.GEMINI_API_KEY:
+        return {"type": "error", "message": "GEMINI_API_KEY is not configured. Cannot analyse images."}
+
+    genai.configure(api_key=settings.GEMINI_API_KEY)
+
+    prompt = (
+        "Analyze this food product image carefully.\n"
+        "Return ONLY valid JSON — no markdown, no code fences, no explanation.\n\n"
+        "CASE 1 — If you can clearly read a barcode number (EAN/UPC digits):\n"
+        '{"type":"barcode","value":"THE_BARCODE_DIGITS"}\n\n'
+        "CASE 2 — If you see a nutrition facts panel or an ingredients list (no readable barcode):\n"
+        '{"type":"nutrition","product_name":"name or null","brand":"brand or null",'
+        '"ingredients_text":"full ingredient list as plain text or null",'
+        '"nutriments":{"energy_kcal":0,"fat_100g":0,"saturated_fat_100g":0,'
+        '"sugar_100g":0,"salt_100g":0,"fiber_100g":0}}\n\n'
+        "CASE 3 — If the image is unclear or neither a barcode nor a food label:\n"
+        '{"type":"unknown","message":"brief reason"}\n\n'
+        "Respond with ONLY the JSON object."
+    )
+
+    loop = asyncio.get_running_loop()
+
+    # Prefer 1.5-flash (fast + multimodal); fall back to other vision-capable models.
+    candidate_models = [
+        "models/gemini-2.0-flash",
+        "models/gemini-flash-latest",
+        "models/gemini-2.0-flash-lite",
+    ]
+
+    last_error: Optional[Exception] = None
+    for model_name in candidate_models:
+        try:
+            model = genai.GenerativeModel(model_name)
+            # Pass raw bytes — the SDK handles base64 encoding internally.
+            image_part = {"mime_type": mime_type, "data": image_bytes}
+
+            def _call(_model=model, _prompt=prompt, _part=image_part):
+                return _model.generate_content([_prompt, _part])
+
+            response = await loop.run_in_executor(None, _call)
+            text = (getattr(response, "text", None) or str(response)).strip()
+
+            # Strip any accidental markdown code fences.
+            text = re.sub(r"^```(?:json)?[\s]*", "", text, flags=re.MULTILINE)
+            text = re.sub(r"[\s]*```$", "", text, flags=re.MULTILINE)
+            text = text.strip()
+
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                # Try to extract a JSON object embedded in extra text.
+                match = re.search(r"\{.*\}", text, re.DOTALL)
+                if match:
+                    return json.loads(match.group())
+                last_error = json.JSONDecodeError("no JSON object found", text, 0)
+                continue
+
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            continue
+
+    reason = f"{type(last_error).__name__}: {last_error}" if last_error else "Unknown"
+    return {"type": "error", "message": f"Image analysis failed: {reason}"}
 

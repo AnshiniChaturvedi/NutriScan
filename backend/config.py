@@ -21,7 +21,7 @@ class Settings(BaseSettings):
 
     # LLM / Gemini
     GEMINI_API_KEY: Optional[str] = None
-    GEMINI_MODEL: str = "gemini-1.5-flash"
+    GEMINI_MODEL: str = "models/gemini-2.0-flash"
 
     class Config:
         env_file = ".env"
