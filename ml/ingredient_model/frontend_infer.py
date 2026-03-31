@@ -9,22 +9,16 @@ from typing import Any, Dict, List, Optional
 import easyocr
 import joblib
 import numpy as np
+import pandas as pd
 import requests
 import torch
 from PIL import Image
+from PIL import ImageEnhance
 
 # Ensure project root is importable when this script is executed as a file.
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
-
-from backend.services.ml_service import (
-    compute_age_group_impacts,
-    compute_consumption_disclaimer,
-    compute_health_score,
-    compute_processing_level,
-    predict_disease_risks,
-)
 
 
 OFF_PRODUCT_URL = "https://world.openfoodfacts.org/api/v0/product/{barcode}.json"
@@ -169,8 +163,32 @@ def _extract_text_from_image(image_path: str) -> str:
     processed_path = _validate_and_preprocess_image(image_path)
     try:
         reader = _get_ocr_reader()
+        texts: List[str] = []
+
+        # Pass 1: raw image.
         blocks = reader.readtext(processed_path, detail=0)
-        return " ".join(blocks).strip()
+        if blocks:
+            texts.append(" ".join(blocks).strip())
+
+        # Pass 2: grayscale + boosted contrast for faint labels/barcodes.
+        with Image.open(processed_path) as img:
+            gray = img.convert("L")
+            contrast = ImageEnhance.Contrast(gray).enhance(2.0)
+            ocr_path = processed_path + ".ocr.png"
+            contrast.save(ocr_path, "PNG")
+        try:
+            blocks2 = reader.readtext(ocr_path, detail=0)
+            if blocks2:
+                texts.append(" ".join(blocks2).strip())
+        finally:
+            if Path(ocr_path).exists():
+                try:
+                    Path(ocr_path).unlink()
+                except Exception:
+                    pass
+
+        merged = " ".join(t for t in texts if t).strip()
+        return re.sub(r"\s+", " ", merged)
     finally:
         # Clean up temporary processed image if created.
         if processed_path != image_path and Path(processed_path).exists():
@@ -183,8 +201,18 @@ def _extract_text_from_image(image_path: str) -> str:
 def _barcode_candidates(text: str) -> List[str]:
     if not text:
         return []
-    compact = re.sub(r"[^0-9]", " ", text)
+
+    normalized = text.upper()
+    normalized = normalized.replace("O", "0").replace("I", "1").replace("L", "1")
+
+    compact = re.sub(r"[^0-9]", " ", normalized)
     raw = re.findall(r"\b\d{8,14}\b", compact)
+
+    # Also consider long digit streams split by spaces/hyphens.
+    joined = re.sub(r"[^0-9]", "", normalized)
+    if 8 <= len(joined) <= 14:
+        raw.append(joined)
+
     # Longer candidates are usually more likely to be EAN13/UPC.
     uniq = sorted(set(raw), key=lambda x: (-len(x), x))
     return uniq
@@ -192,6 +220,12 @@ def _barcode_candidates(text: str) -> List[str]:
 
 def analyze_from_image(image_path: str) -> Dict[str, Any]:
     ocr_text = _extract_text_from_image(image_path)
+
+    if not ocr_text:
+        return {
+            "error": "No readable text found in image. Try a sharper, well-lit photo with barcode or nutrition panel visible.",
+            "ocr_text": "",
+        }
 
     # 1) Prefer barcode detection from OCR text.
     for code in _barcode_candidates(ocr_text):
@@ -205,7 +239,9 @@ def analyze_from_image(image_path: str) -> Dict[str, Any]:
     # 2) Fallback to product-name search from OCR words.
     words = re.findall(r"[A-Za-z][A-Za-z0-9\-]{2,}", ocr_text)
     if words:
-        query = " ".join(words[:6])
+        stop = {"nutrition", "ingredients", "energy", "fat", "salt", "fiber", "sugar", "kcal"}
+        tokens = [w for w in words if w.lower() not in stop]
+        query = " ".join(tokens[:6] if tokens else words[:6])
         candidates = search_by_name(query, page_size=12)
         if candidates:
             out = analyze_product(candidates[0])
@@ -219,22 +255,19 @@ def analyze_from_image(image_path: str) -> Dict[str, Any]:
     }
 
 
-def _ml_vector(nutriments: Dict[str, float]) -> np.ndarray:
-    x = np.array(
-        [
-            _safe_float(nutriments.get("energy_kcal")),
-            _safe_float(nutriments.get("fat_100g")),
-            _safe_float(nutriments.get("saturated_fat_100g")),
-            _safe_float(nutriments.get("sugar_100g")),
-            _safe_float(nutriments.get("salt_100g")),
-            _safe_float(nutriments.get("fiber_100g")),
-            0.0,
-            _safe_float(nutriments.get("additives_count")),
-            _safe_float(nutriments.get("nova_group")),
-        ],
-        dtype=float,
-    ).reshape(1, -1)
-    return x
+def _ml_vector(nutriments: Dict[str, float]) -> pd.DataFrame:
+    row = {
+        "energy_kcal_100g": _safe_float(nutriments.get("energy_kcal")),
+        "fat_100g": _safe_float(nutriments.get("fat_100g")),
+        "saturated_fat_100g": _safe_float(nutriments.get("saturated_fat_100g")),
+        "sugars_100g": _safe_float(nutriments.get("sugar_100g")),
+        "salt_100g": _safe_float(nutriments.get("salt_100g")),
+        "fiber_100g": _safe_float(nutriments.get("fiber_100g")),
+        "proteins_100g": 0.0,
+        "additives_n": _safe_float(nutriments.get("additives_count")),
+        "nova_group": _safe_float(nutriments.get("nova_group")),
+    }
+    return pd.DataFrame([row], columns=NUMERIC_FEATURES)
 
 
 def ml_predict_flags(nutriments: Dict[str, float]) -> Dict[str, Any]:
@@ -271,16 +304,202 @@ def ml_predict_flags(nutriments: Dict[str, float]) -> Dict[str, Any]:
     }
 
 
+def _prob(probs: Dict[str, float], key: str) -> float:
+    return float(np.clip(float(probs.get(key, 0.0)), 0.0, 1.0))
+
+
+def _confidence_from_risk(risk: float) -> float:
+    return float(round(min(0.95, 0.55 + abs(risk - 0.5) * 0.8), 3))
+
+
+def _derive_health_score_from_ml(probs: Dict[str, float]) -> float:
+    harmful_keys = [
+        "added_sugar",
+        "artificial_color",
+        "preservative",
+        "emulsifier",
+        "artificial_flavor",
+        "caffeine",
+        "palm_oil",
+    ]
+    beneficial_keys = ["natural_protein_source", "fiber_source"]
+
+    harmful_signal = float(np.mean([_prob(probs, k) for k in harmful_keys])) if harmful_keys else 0.0
+    beneficial_signal = (
+        float(np.mean([_prob(probs, k) for k in beneficial_keys])) if beneficial_keys else 0.0
+    )
+
+    raw = ((1.0 - harmful_signal) * 0.82) + (beneficial_signal * 0.18)
+    return round(float(np.clip(raw, 0.0, 1.0) * 100.0), 2)
+
+
+def _derive_disease_risks_from_ml(probs: Dict[str, float]) -> Dict[str, Dict[str, float]]:
+    diabetes = (
+        (_prob(probs, "added_sugar") * 0.7)
+        + (_prob(probs, "artificial_flavor") * 0.15)
+        + (_prob(probs, "emulsifier") * 0.15)
+    )
+    heart = (
+        (_prob(probs, "palm_oil") * 0.4)
+        + (_prob(probs, "added_sugar") * 0.25)
+        + (_prob(probs, "preservative") * 0.2)
+        + (_prob(probs, "emulsifier") * 0.15)
+    )
+    obesity = (
+        (_prob(probs, "added_sugar") * 0.6)
+        + (_prob(probs, "palm_oil") * 0.25)
+        + (_prob(probs, "artificial_flavor") * 0.15)
+    )
+    hypertension = (
+        (_prob(probs, "preservative") * 0.45)
+        + (_prob(probs, "emulsifier") * 0.25)
+        + (_prob(probs, "added_sugar") * 0.2)
+        + (_prob(probs, "artificial_color") * 0.1)
+    )
+
+    risks = {
+        "diabetes": float(np.clip(diabetes, 0.0, 1.0)),
+        "heart_disease": float(np.clip(heart, 0.0, 1.0)),
+        "obesity": float(np.clip(obesity, 0.0, 1.0)),
+        "hypertension": float(np.clip(hypertension, 0.0, 1.0)),
+    }
+
+    return {
+        disease: {
+            "risk": round(risk, 3),
+            "confidence": _confidence_from_risk(risk),
+        }
+        for disease, risk in risks.items()
+    }
+
+
+def _derive_processing_level_from_ml(probs: Dict[str, float]) -> Dict[str, str]:
+    ultra_signal = (
+        (_prob(probs, "artificial_color") * 0.2)
+        + (_prob(probs, "preservative") * 0.2)
+        + (_prob(probs, "emulsifier") * 0.2)
+        + (_prob(probs, "artificial_flavor") * 0.2)
+        + (_prob(probs, "palm_oil") * 0.2)
+    )
+    ultra_signal = float(np.clip(ultra_signal, 0.0, 1.0))
+
+    if ultra_signal >= 0.75:
+        group = 4
+    elif ultra_signal >= 0.5:
+        group = 3
+    elif ultra_signal >= 0.25:
+        group = 2
+    else:
+        group = 1
+
+    meta = {
+        1: (
+            "NOVA 1 — Low Processing Signal",
+            "ML indicates low ultra-processing additive patterns.",
+            "Generally a cleaner ingredient profile from model perspective.",
+        ),
+        2: (
+            "NOVA 2 — Mild Processing Signal",
+            "ML indicates mild processing markers.",
+            "Consume normally while checking context and portion size.",
+        ),
+        3: (
+            "NOVA 3 — Processed Pattern",
+            "ML indicates multiple processing-related ingredient markers.",
+            "Prefer moderate intake and compare with cleaner alternatives.",
+        ),
+        4: (
+            "NOVA 4 — Ultra-Processed Pattern",
+            "ML indicates strong ultra-processing additive signatures.",
+            "Best consumed occasionally; prefer minimally processed alternatives.",
+        ),
+    }
+
+    label, description, health_note = meta[group]
+    return {
+        "nova_group": str(group),
+        "label": label,
+        "description": description,
+        "health_note": health_note,
+        "source": "inferred",
+    }
+
+
+def _derive_age_group_impacts_from_ml(disease_risks: Dict[str, Dict[str, float]]) -> Dict[str, Dict[str, str]]:
+    avg_risk = float(np.mean([v["risk"] for v in disease_risks.values()])) if disease_risks else 0.0
+    risk_map = {
+        "infant": min(1.0, avg_risk * 1.15),
+        "child": min(1.0, avg_risk * 1.1),
+        "young_adult": avg_risk,
+        "adult": avg_risk,
+        "senior": min(1.0, avg_risk * 1.05),
+    }
+
+    def _level(v: float) -> str:
+        if v < 0.25:
+            return "low"
+        if v < 0.5:
+            return "moderate"
+        if v < 0.75:
+            return "high"
+        return "very_high"
+
+    labels = {
+        "infant": "Infant (0–2 years)",
+        "child": "Child (3–12 years)",
+        "young_adult": "Young Adult (13–35 years)",
+        "adult": "Adult (36–60 years)",
+        "senior": "Senior (60+ years)",
+    }
+
+    return {
+        key: {
+            "label": labels[key],
+            "risk_level": _level(value),
+            "notes": "Estimated from model-predicted ingredient risk profile.",
+        }
+        for key, value in risk_map.items()
+    }
+
+
+def _derive_consumption_disclaimer_from_ml(health_score: float) -> Dict[str, str]:
+    if health_score >= 80:
+        freq = "Regular"
+        guidance = "Model indicates a relatively safe ingredient profile."
+    elif health_score >= 60:
+        freq = "Frequent"
+        guidance = "Model indicates moderate safety with some caution markers."
+    elif health_score >= 40:
+        freq = "Occasional"
+        guidance = "Model indicates mixed ingredient quality; avoid frequent overconsumption."
+    else:
+        freq = "Rare"
+        guidance = "Model indicates high-risk ingredient patterns."
+
+    return {
+        "recommended_frequency": freq,
+        "general_guidance": guidance,
+        "specific_warnings": "Predictions are probabilistic and should be interpreted with serving context.",
+        "disclaimer": "ML-only estimate based on trained ingredient-label models.",
+    }
+
+
 def analyze_product(product: Dict[str, Any]) -> Dict[str, Any]:
     nutriments = product["nutriments"]
-    ingredients_text = product.get("ingredients_text") or ""
-
-    health_score = compute_health_score(nutriments)
-    disease_risks = predict_disease_risks(nutriments)
-    processing_level = compute_processing_level(nutriments, ingredients_text)
-    age_group_impacts = compute_age_group_impacts(nutriments)
-    consumption_disclaimer = compute_consumption_disclaimer(nutriments, health_score)
     ml_output = ml_predict_flags(nutriments)
+
+    probs = ml_output.get("ml_feature_probabilities", {}) if ml_output.get("model_ready") else {}
+    health_score = _derive_health_score_from_ml(probs) if probs else 0.0
+    disease_risks = _derive_disease_risks_from_ml(probs) if probs else {}
+    processing_level = _derive_processing_level_from_ml(probs) if probs else {
+        "nova_group": "unknown",
+        "label": "Unknown",
+        "description": "ML model artifacts are not available.",
+        "health_note": "Train/export models to enable processing-level inference.",
+        "source": "unknown",
+    }
+    age_group_impacts = _derive_age_group_impacts_from_ml(disease_risks) if disease_risks else {}
+    consumption_disclaimer = _derive_consumption_disclaimer_from_ml(health_score)
 
     return {
         "product": product,

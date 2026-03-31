@@ -17,8 +17,24 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ detail: 'Missing image file.' }, { status: 400 });
     }
 
+    const mimeToExt: Record<string, string> = {
+      'image/jpeg': '.jpg',
+      'image/jpg': '.jpg',
+      'image/png': '.png',
+      'image/webp': '.webp',
+      'image/bmp': '.bmp',
+    };
+    const ext = mimeToExt[image.type.toLowerCase()];
+    if (!ext) {
+      return NextResponse.json(
+        {
+          detail: `Unsupported image format (${image.type || 'unknown'}). Use JPEG, PNG, WEBP, or BMP.`,
+        },
+        { status: 415 },
+      );
+    }
+
     const bytes = Buffer.from(await image.arrayBuffer());
-    const ext = image.type.includes('png') ? '.png' : '.jpg';
     tempPath = path.join(os.tmpdir(), `nutriscan-${randomUUID()}${ext}`);
     await writeFile(tempPath, bytes);
 

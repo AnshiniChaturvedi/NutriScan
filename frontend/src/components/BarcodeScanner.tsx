@@ -386,7 +386,7 @@ export default function BarcodeScanner({ onClose }: BarcodeScannerProps) {
                         <p className="text-slate-300 text-sm font-medium">
                           Drag &amp; drop or <span className="text-purple-400">click to browse</span>
                         </p>
-                        <p className="text-slate-600 text-xs mt-1">JPEG · PNG · WebP · HEIC</p>
+                        <p className="text-slate-600 text-xs mt-1">JPEG · PNG · WebP · BMP</p>
                       </div>
                     </>
                   )}
