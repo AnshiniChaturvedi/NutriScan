@@ -1,153 +1,245 @@
-## NutriScan AI Backend
+# NutriScan AI
 
-Backend + ML pipeline for analyzing packaged foods by barcode and providing health insights.
+An AI-powered food intelligence platform that analyzes packaged products from barcode, product name, or image upload and returns nutrition and ingredient-based risk insights.
 
-This project is **backend-only** so you can later connect any web/mobile frontend to it.
+NutriScan combines:
+- Open Food Facts product retrieval
+- OCR-powered label reading
+- Multi-label ML inference (Random Forest + XGBoost ensemble)
+- Next.js dashboard experience with scan, upload, recommendations, and chat
 
-### Project Structure (initial)
+---
 
-- **backend/**
-  - **app.py** – FastAPI app factory and `app` instance.
-  - **config.py** – Environment / settings management using `pydantic-settings`.
-  - **routes/**
-    - **\_\_init\_\_.py** – Route package marker + docs.
-    - **scan.py** – Example `/api/scan-product` endpoint that accepts a barcode and returns stubbed product data.
-  - **models/**
-    - **\_\_init\_\_.py** – Models package marker.
-    - **schemas.py** – Pydantic request/response schemas (e.g., `ScanRequest`, `ProductDetails`).
-  - **utils/**
-    - **\_\_init\_\_.py** – Placeholder for shared utilities.
-- **requirements.txt** – Python dependencies with versions.
-- **.env.example** – Example environment configuration (copy to `.env` and edit).
+## Why NutriScan
 
-Later we will add:
+Most nutrition apps only show raw numbers. NutriScan focuses on practical interpretation:
+- Is this product likely to contain high-risk ingredient traits?
+- How strong is that prediction?
+- What healthier alternatives exist?
 
-- `services/` for OpenFoodFacts, ML models, LLM/RAG logic.
-- `ml/` and `rag/` directories as per your full spec.
+---
 
-### Setup & Running the Server
+## Core Features
 
-1. **Create and activate a virtual environment (Windows / PowerShell)**
+- Barcode scanning from camera
+- Product-name lookup fallback
+- Image upload analysis with OCR + barcode/text extraction
+- ML-only ingredient risk predictions using your trained models
+- Product dashboard with score, risk panels, and recommendations
+- Chat assistant with product context
 
-```powershell
-cd "c:\Users\Shikhar\OneDrive\Desktop\Documents\FreshCheck\nutriscan-ai"
-python -m venv .venv
-.venv\Scripts\Activate.ps1
+---
+
+## Tech Stack
+
+### Frontend
+- Next.js 14
+- React 18
+- Tailwind CSS
+- Framer Motion
+- Three.js / React Three Fiber
+
+### ML + Data
+- Python 3.13
+- scikit-learn
+- XGBoost
+- EasyOCR
+- PyTorch / Transformers
+- Open Food Facts API
+
+---
+
+## Project Structure
+
+```text
+nutriscan-ai/
+  backend/
+    app.py
+    services/
+  frontend/
+    src/app/
+    src/components/
+    src/lib/
+  ml/
+    data/
+    ingredient_model/
+    saved_models/
+  start-dev.bat
+  requirements.txt
 ```
 
-2. **Install dependencies**
+---
+
+## How The Pipeline Works
+
+1. Input source
+   - Barcode scan
+   - Product name
+   - Uploaded image
+
+2. Retrieval and extraction
+   - Open Food Facts product fetch/search
+   - OCR text extraction for images
+   - Barcode candidate extraction from OCR text
+
+3. ML inference
+   - Feature vector created from nutriments
+   - Random Forest and XGBoost probabilities computed per label
+   - Ensemble average + tuned thresholds for final flags
+
+4. Response to UI
+   - `ml_feature_probabilities`
+   - `ml_flags`
+   - Derived dashboard fields for visualization
+
+---
+
+## Quick Start (Windows)
+
+### 1) Clone
 
 ```powershell
+git clone https://github.com/Shikhar28-web/NutriScan.git
+cd NutriScan\nutriscan-ai
+```
+
+### 2) Python setup
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-3. **Create your `.env` file**
-
-Copy the example and fill in real values:
+### 3) Frontend setup
 
 ```powershell
-copy .env.example .env
+cd frontend
+npm install
+cd ..
 ```
 
-Then edit `.env` (e.g., set `GEMINI_API_KEY`).
-
-4. **Run the FastAPI server**
-
-From the project root (`nutriscan-ai`):
+### 4) Run project (recommended)
 
 ```powershell
-uvicorn backend.app:app --reload --host 0.0.0.0 --port 8000
+& "c:\Users\Shikhar\OneDrive\Desktop\sem4_projects\NutriScan\nutriscan-ai\start-dev.bat"
 ```
 
-5. **Test the API**
+App runs at:
+- http://localhost:3000
 
-- Open interactive docs in your browser: `http://localhost:8000/docs`
-- Try:
-  - `GET /health` – basic health check.
-  - `POST /api/scan-product` with JSON body: `{ "barcode": "1234567890123" }`
+---
 
-This skeleton is designed so that **all ML and RAG logic** will live in dedicated `services/` and `ml/` modules, making it easy to connect any frontend later.
+## Cross-Platform Run (Manual)
 
-## ML-First Pipeline (Open Food Facts + RF + XGBoost)
+Use this if you do not want to rely on the Windows batch script.
 
-The project now includes an end-to-end ML pipeline under `ml/ingredient_model`:
+### Windows PowerShell
 
-1. Image Input
-2. OCR with EasyOCR
-3. Text Cleaning
-4. BERT-based Ingredient Extraction
-5. Ingredient Mapping DB
-6. Rule-Based Engine (Primary)
-7. ML Enhancement using Random Forest + XGBoost
-8. Final Health Risk Output
+```powershell
+cd nutriscan-ai
+$env:PYTHON_BIN = "c:/Users/Shikhar/OneDrive/Desktop/sem4_projects/NutriScan/.venv/Scripts/python.exe"
+cd frontend
+npm run dev
+```
 
-### Files
+### macOS / Linux
 
-- `ml/ingredient_model/off_pipeline.py`
-  - Downloads product data from Open Food Facts.
-  - Builds engineered dataset with all numeric nutrition features + ingredient feature labels.
-  - Trains both Random Forest and XGBoost feature models.
+```bash
+cd nutriscan-ai
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cd frontend
+npm install
+PYTHON_BIN="$(pwd)/../.venv/bin/python3" npm run dev
+```
 
-- `ml/ingredient_model/ingredient_mapping_db.json`
-  - Ingredient keyword mapping database for feature flags.
+---
 
-- `ml/ingredient_model/health_inference.py`
-  - OCR + BERT + mapping + rule engine + ML enhancement inference flow.
+## Model Training
 
-- `ml/ingredient_model/run_health_pipeline.py`
-  - CLI entrypoint to run inference on an image.
-
-### Train Models from Open Food Facts
-
-From project root:
+Train dataset + models from Open Food Facts:
 
 ```powershell
 python -m ml.ingredient_model.off_pipeline --dataset-out ml/data/openfoodfacts_features.csv --models-out ml/saved_models --page-size 250 --page-limit 20
 ```
 
-For stronger accuracy tuning, increase search depth and CV folds:
+Higher search depth (slower, usually better):
 
 ```powershell
 python -m ml.ingredient_model.off_pipeline --dataset-out ml/data/openfoodfacts_features.csv --models-out ml/saved_models --page-size 250 --page-limit 40 --rf-search-iter 45 --rf-cv 5
 ```
 
-This saves:
-
+Artifacts produced:
 - `ml/data/openfoodfacts_features.csv`
 - `ml/saved_models/rf_feature_model.joblib`
 - `ml/saved_models/xgb_feature_model.joblib`
 - `ml/saved_models/training_metrics.json`
 
-Quality controls built into training:
+---
 
-- Train/validation/test split (not just train/test) for stronger generalization checks.
-- Random Forest hyperparameter search (`RandomizedSearchCV`) to improve accuracy.
-- XGBoost per-label training with early stopping on validation data.
-- Per-label decision-threshold tuning on validation data to maximize F1.
-- Overfit/underfit diagnostics in `training_metrics.json` using train-vs-val gap and low-score checks.
+## Image Upload Notes
 
-### Run Full OCR to Risk Inference
+Supported upload formats:
+- JPEG
+- PNG
+- WEBP
+- BMP
 
-Create a nutriments JSON file (example):
+Best OCR results:
+- Keep barcode/text in focus
+- Use good lighting
+- Avoid motion blur
+- Fill most of frame with label/barcode
 
-```json
-{
-  "energy_kcal_100g": 420,
-  "fat_100g": 17,
-  "saturated_fat_100g": 6,
-  "sugars_100g": 21,
-  "salt_100g": 1.1,
-  "fiber_100g": 2.5,
-  "proteins_100g": 5.2,
-  "additives_n": 4,
-  "nova_group": 4
-}
-```
+---
 
-Run:
+## Troubleshooting
+
+### Port 3000 already in use
+
+Stop existing process or run frontend on another port.
+
+### Batch file not found
+
+Run from project folder or use absolute path:
 
 ```powershell
-python -m ml.ingredient_model.run_health_pipeline --image path\to\label.jpg --nutriments-json path\to\nutriments.json
+& "c:\Users\Shikhar\OneDrive\Desktop\sem4_projects\NutriScan\nutriscan-ai\start-dev.bat"
 ```
+
+### Image not detected
+
+Try:
+- Higher quality image
+- Straight angle capture
+- Barcode-only crop
+- Manual product name input as fallback
+
+---
+
+## API Endpoints (Frontend Routes)
+
+- `POST /api/scan-product`
+- `POST /api/analyze-food`
+- `POST /api/analyze-image`
+- `GET /api/recommendations`
+- `POST /api/chat`
+
+---
+
+## Current Status
+
+- ML ensemble integrated and active
+- OCR upload flow improved with stronger preprocessing
+- Runtime feature-name compatibility fixed in inference
+- Project deployed from a unified Next.js + Python bridge workflow
+
+---
+
+## License
+
+See `LICENSE`.
 
