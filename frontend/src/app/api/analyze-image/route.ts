@@ -39,6 +39,10 @@ export async function POST(req: NextRequest) {
     await writeFile(tempPath, bytes);
 
     const result = await runMlBridge(['analyze-image', '--image', tempPath]);
+    if (result && typeof result === 'object' && 'error' in result) {
+      const message = String((result as { error?: string }).error || 'Image analysis failed');
+      return NextResponse.json({ detail: message }, { status: 422 });
+    }
     return NextResponse.json(result);
   } catch (err) {
     return NextResponse.json({ detail: `Image analysis failed: ${String(err)}` }, { status: 500 });

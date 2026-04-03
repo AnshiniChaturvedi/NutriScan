@@ -22,7 +22,17 @@ if str(PROJECT_ROOT) not in sys.path:
 
 
 OFF_PRODUCT_URL = "https://world.openfoodfacts.org/api/v0/product/{barcode}.json"
+OFF_PRODUCT_URLS = [
+    "https://world.openfoodfacts.org/api/v0/product/{barcode}.json",
+    "https://world.openfoodfacts.net/api/v0/product/{barcode}.json",
+    "https://us.openfoodfacts.org/api/v0/product/{barcode}.json",
+]
 OFF_SEARCH_URL = "https://world.openfoodfacts.org/cgi/search.pl"
+OFF_SEARCH_URLS = [
+    "https://world.openfoodfacts.org/cgi/search.pl",
+    "https://world.openfoodfacts.net/cgi/search.pl",
+    "https://us.openfoodfacts.org/cgi/search.pl",
+]
 OFF_HEADERS = {
     "User-Agent": "NutriScan-AI/1.0 frontend-ml-bridge",
     "Accept": "application/json",
@@ -45,6 +55,33 @@ NUMERIC_FEATURES: List[str] = [
 ]
 
 _ocr_reader: Optional[easyocr.Reader] = None
+_local_df: Optional[pd.DataFrame] = None
+
+
+def _normalize_barcode(value: str) -> str:
+    return re.sub(r"[^0-9]", "", str(value or "").strip())
+
+
+def _barcode_variants(barcode: str) -> List[str]:
+    b = _normalize_barcode(barcode)
+    if not b:
+        return []
+
+    variants = [b]
+    # UPC-A (12) may appear as EAN-13 with leading zero, and vice versa.
+    if len(b) == 12:
+        variants.append(f"0{b}")
+    if len(b) == 13 and b.startswith("0"):
+        variants.append(b[1:])
+
+    # Keep first seen order while removing duplicates.
+    seen = set()
+    out: List[str] = []
+    for item in variants:
+        if item and item not in seen:
+            out.append(item)
+            seen.add(item)
+    return out
 
 
 def _safe_float(v: Any) -> float:
@@ -90,15 +127,154 @@ def _parse_off_product(product: Dict[str, Any], fallback_code: str = "") -> Dict
     }
 
 
+def _local_dataset_path() -> Path:
+    return Path("ml/data/openfoodfacts_features.csv")
+
+
+def _safe_text(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text if text else None
+
+
+def _load_local_df() -> pd.DataFrame:
+    global _local_df
+    if _local_df is not None:
+        return _local_df
+
+    path = _local_dataset_path()
+    if not path.exists():
+        _local_df = pd.DataFrame()
+        return _local_df
+
+    try:
+        df = pd.read_csv(path, dtype={"code": str}, low_memory=False)
+    except Exception:
+        _local_df = pd.DataFrame()
+        return _local_df
+
+    # Normalize common fields used in fallback responses.
+    if "code" in df.columns:
+        df["code"] = df["code"].fillna("").astype(str).map(_normalize_barcode)
+    else:
+        df["code"] = ""
+
+    if "product_name" not in df.columns:
+        df["product_name"] = ""
+    if "ingredients_text" not in df.columns:
+        df["ingredients_text"] = ""
+
+    _local_df = df
+    return _local_df
+
+
+def _local_row_to_product(row: pd.Series, fallback_code: str = "") -> Dict[str, Any]:
+    code = _normalize_barcode(str(row.get("code", ""))) or fallback_code
+    nutriments = {
+        "sugar_100g": _safe_float(row.get("sugars_100g")),
+        "fat_100g": _safe_float(row.get("fat_100g")),
+        "saturated_fat_100g": _safe_float(row.get("saturated_fat_100g")),
+        "salt_100g": _safe_float(row.get("salt_100g")),
+        "fiber_100g": _safe_float(row.get("fiber_100g")),
+        "additives_count": _safe_float(row.get("additives_n")),
+        "energy_kcal": _safe_float(row.get("energy_kcal_100g")),
+        "nova_group": _safe_float(row.get("nova_group")),
+    }
+    return {
+        "barcode": code,
+        "product_name": _safe_text(row.get("product_name")),
+        "brand": None,
+        "ingredients_text": _safe_text(row.get("ingredients_text")),
+        "nutriments": nutriments,
+    }
+
+
+def _lookup_local_by_barcode(barcode: str) -> Optional[Dict[str, Any]]:
+    df = _load_local_df()
+    if df.empty:
+        return None
+
+    for code in _barcode_variants(barcode):
+        rows = df[df["code"] == code]
+        if not rows.empty:
+            return _local_row_to_product(rows.iloc[0], fallback_code=code)
+    return None
+
+
+def _correct_barcode_from_local(candidate: str, max_distance: int = 1) -> Optional[str]:
+    """
+    Try to correct OCR-misread barcodes by finding a nearby local barcode
+    with small Hamming distance and same digit-length.
+    """
+    code = _normalize_barcode(candidate)
+    if not code:
+        return None
+
+    df = _load_local_df()
+    if df.empty:
+        return None
+
+    local_codes = df["code"].dropna().astype(str)
+    same_len = local_codes[local_codes.str.len() == len(code)].drop_duplicates()
+    if same_len.empty:
+        return None
+
+    best_code: Optional[str] = None
+    best_dist = 999
+    for local_code in same_len:
+        dist = sum(1 for a, b in zip(code, local_code) if a != b)
+        if dist < best_dist:
+            best_dist = dist
+            best_code = local_code
+            if best_dist == 0:
+                break
+
+    if best_code and best_dist <= max_distance:
+        return best_code
+    return None
+
+
+def _search_local_by_name(name: str, limit: int = 10) -> List[Dict[str, Any]]:
+    query = (name or "").strip().lower()
+    if not query:
+        return []
+
+    df = _load_local_df()
+    if df.empty:
+        return []
+
+    products = df["product_name"].fillna("").astype(str)
+    mask = products.str.lower().str.contains(re.escape(query), regex=True)
+    matches = df[mask].head(limit)
+
+    out: List[Dict[str, Any]] = []
+    for _, row in matches.iterrows():
+        item = _local_row_to_product(row)
+        if item.get("product_name"):
+            out.append(item)
+    return out
+
+
 def fetch_by_barcode(barcode: str) -> Optional[Dict[str, Any]]:
-    r = requests.get(OFF_PRODUCT_URL.format(barcode=barcode), headers=OFF_HEADERS, timeout=20)
-    if r.status_code != 200:
-        return None
-    data = r.json()
-    if data.get("status") != 1:
-        return None
-    product = data.get("product", {}) or {}
-    return _parse_off_product(product, fallback_code=barcode)
+    for code in _barcode_variants(barcode):
+        for url in OFF_PRODUCT_URLS:
+            try:
+                r = requests.get(url.format(barcode=code), headers=OFF_HEADERS, timeout=20)
+            except requests.RequestException:
+                continue
+
+            if r.status_code != 200:
+                continue
+
+            data = r.json()
+            if data.get("status") != 1:
+                continue
+
+            product = data.get("product", {}) or {}
+            return _parse_off_product(product, fallback_code=code)
+
+    return _lookup_local_by_barcode(barcode)
 
 
 def search_by_name(name: str, page_size: int = 15) -> List[Dict[str, Any]]:
@@ -109,18 +285,29 @@ def search_by_name(name: str, page_size: int = 15) -> List[Dict[str, Any]]:
         "page_size": page_size,
         "fields": "code,product_name,brands,ingredients_text,nutriments,additives_n,nova_group",
     }
-    r = requests.get(OFF_SEARCH_URL, params=params, headers=OFF_HEADERS, timeout=25)
-    if r.status_code != 200:
-        return []
-    data = r.json()
-    products = data.get("products", [])
     out: List[Dict[str, Any]] = []
-    for p in products:
-        parsed = _parse_off_product(p)
-        # Accept products that have at least a name - barcode might be missing in some cases
-        if parsed.get("product_name"):
-            out.append(parsed)
-    return out
+    for url in OFF_SEARCH_URLS:
+        try:
+            r = requests.get(url, params=params, headers=OFF_HEADERS, timeout=25)
+        except requests.RequestException:
+            continue
+
+        if r.status_code != 200:
+            continue
+
+        data = r.json()
+        products = data.get("products", [])
+        for p in products:
+            parsed = _parse_off_product(p)
+            # Accept products that have at least a name - barcode might be missing in some cases
+            if parsed.get("product_name"):
+                out.append(parsed)
+
+        if out:
+            return out
+
+    # Fallback to local dataset when OFF lookup is unavailable/incomplete.
+    return _search_local_by_name(name, limit=page_size)
 
 
 def _get_ocr_reader() -> easyocr.Reader:
@@ -236,6 +423,17 @@ def analyze_from_image(image_path: str) -> Dict[str, Any]:
             out["detected_barcode"] = code
             return out
 
+        corrected = _correct_barcode_from_local(code, max_distance=1)
+        if corrected and corrected != code:
+            product = fetch_by_barcode(corrected)
+            if product:
+                out = analyze_product(product)
+                out["ocr_text"] = ocr_text
+                out["detected_barcode"] = corrected
+                out["ocr_raw_barcode"] = code
+                out["barcode_corrected"] = True
+                return out
+
     # 2) Fallback to product-name search from OCR words.
     words = re.findall(r"[A-Za-z][A-Za-z0-9\-]{2,}", ocr_text)
     if words:
@@ -312,7 +510,7 @@ def _confidence_from_risk(risk: float) -> float:
     return float(round(min(0.95, 0.55 + abs(risk - 0.5) * 0.8), 3))
 
 
-def _derive_health_score_from_ml(probs: Dict[str, float]) -> float:
+def _derive_ml_ingredient_score(probs: Dict[str, float]) -> float:
     harmful_keys = [
         "added_sugar",
         "artificial_color",
@@ -330,7 +528,87 @@ def _derive_health_score_from_ml(probs: Dict[str, float]) -> float:
     )
 
     raw = ((1.0 - harmful_signal) * 0.82) + (beneficial_signal * 0.18)
-    return round(float(np.clip(raw, 0.0, 1.0) * 100.0), 2)
+    return float(np.clip(raw, 0.0, 1.0))
+
+
+def _clamp_ratio(value: float, low: float, high: float) -> float:
+    if high <= low:
+        return 0.0
+    return float(np.clip((value - low) / (high - low), 0.0, 1.0))
+
+
+def _derive_nutrient_quality_score(nutriments: Dict[str, float]) -> float:
+    # Penalty thresholds are per 100g and intentionally conservative.
+    sugar = _safe_float(nutriments.get("sugar_100g"))
+    saturated_fat = _safe_float(nutriments.get("saturated_fat_100g"))
+    salt = _safe_float(nutriments.get("salt_100g"))
+    energy = _safe_float(nutriments.get("energy_kcal"))
+    fat = _safe_float(nutriments.get("fat_100g"))
+    additives = _safe_float(nutriments.get("additives_count"))
+    fiber = _safe_float(nutriments.get("fiber_100g"))
+
+    sugar_pen = _clamp_ratio(sugar, 5.0, 25.0)
+    sat_fat_pen = _clamp_ratio(saturated_fat, 1.5, 8.0)
+    salt_pen = _clamp_ratio(salt, 0.3, 2.0)
+    energy_pen = _clamp_ratio(energy, 120.0, 520.0)
+    fat_pen = _clamp_ratio(fat, 3.0, 25.0)
+    additives_pen = _clamp_ratio(additives, 0.0, 8.0)
+
+    # Fiber bonus improves score but cannot fully offset heavy penalties.
+    fiber_bonus = _clamp_ratio(fiber, 2.0, 8.0)
+
+    penalty = (
+        (sugar_pen * 0.28)
+        + (sat_fat_pen * 0.22)
+        + (salt_pen * 0.20)
+        + (energy_pen * 0.14)
+        + (fat_pen * 0.08)
+        + (additives_pen * 0.08)
+    )
+    raw = (1.0 - penalty) + (fiber_bonus * 0.18)
+    return float(np.clip(raw, 0.0, 1.0))
+
+
+def _derive_processing_quality_score(observed_nova_group: float) -> float:
+    try:
+        nova = int(round(observed_nova_group))
+    except (TypeError, ValueError):
+        nova = 0
+
+    # NOVA 1 is best, NOVA 4 is worst for processing quality.
+    mapping = {
+        1: 1.0,
+        2: 0.75,
+        3: 0.48,
+        4: 0.22,
+    }
+    return float(mapping.get(nova, 0.55))
+
+
+def _derive_health_score(
+    nutriments: Dict[str, float],
+    probs: Dict[str, float],
+    disease_risks: Dict[str, Dict[str, float]],
+) -> float:
+    observed_nova = _safe_float(nutriments.get("nova_group")) if nutriments else 0.0
+
+    nutrient_score = _derive_nutrient_quality_score(nutriments)
+    processing_score = _derive_processing_quality_score(observed_nova)
+    ml_score = _derive_ml_ingredient_score(probs) if probs else 0.55
+
+    if disease_risks:
+        avg_disease_risk = float(np.mean([v.get("risk", 0.0) for v in disease_risks.values()]))
+        disease_score = float(np.clip(1.0 - avg_disease_risk, 0.0, 1.0))
+    else:
+        disease_score = 0.55
+
+    combined = (
+        (nutrient_score * 0.45)
+        + (processing_score * 0.20)
+        + (ml_score * 0.20)
+        + (disease_score * 0.15)
+    )
+    return round(float(np.clip(combined, 0.0, 1.0) * 100.0), 2)
 
 
 def _derive_disease_risks_from_ml(probs: Dict[str, float]) -> Dict[str, Dict[str, float]]:
@@ -373,7 +651,46 @@ def _derive_disease_risks_from_ml(probs: Dict[str, float]) -> Dict[str, Dict[str
     }
 
 
-def _derive_processing_level_from_ml(probs: Dict[str, float]) -> Dict[str, str]:
+def _derive_processing_level_from_ml(probs: Dict[str, float], observed_nova_group: Optional[float] = None) -> Dict[str, str]:
+    # Prefer explicit NOVA metadata when present in OFF/local dataset.
+    if observed_nova_group is not None:
+        try:
+            nova = int(round(float(observed_nova_group)))
+        except (TypeError, ValueError):
+            nova = 0
+
+        if 1 <= nova <= 4:
+            direct_meta = {
+                1: (
+                    "NOVA 1 — Unprocessed or Minimally Processed",
+                    "Mapped directly from available product NOVA metadata.",
+                    "Generally a cleaner processing profile.",
+                ),
+                2: (
+                    "NOVA 2 — Processed Culinary Ingredient",
+                    "Mapped directly from available product NOVA metadata.",
+                    "Usually acceptable in moderation based on product context.",
+                ),
+                3: (
+                    "NOVA 3 — Processed Food",
+                    "Mapped directly from available product NOVA metadata.",
+                    "Processed profile; compare with less processed alternatives when possible.",
+                ),
+                4: (
+                    "NOVA 4 — Ultra-Processed Food",
+                    "Mapped directly from available product NOVA metadata.",
+                    "Ultra-processed profile; best consumed occasionally.",
+                ),
+            }
+            label, description, health_note = direct_meta[nova]
+            return {
+                "nova_group": str(nova),
+                "label": label,
+                "description": description,
+                "health_note": health_note,
+                "source": "openfoodfacts",
+            }
+
     ultra_signal = (
         (_prob(probs, "artificial_color") * 0.2)
         + (_prob(probs, "preservative") * 0.2)
@@ -480,7 +797,7 @@ def _derive_consumption_disclaimer_from_ml(health_score: float) -> Dict[str, str
         "recommended_frequency": freq,
         "general_guidance": guidance,
         "specific_warnings": "Predictions are probabilistic and should be interpreted with serving context.",
-        "disclaimer": "ML-only estimate based on trained ingredient-label models.",
+        "disclaimer": "Composite estimate based on nutriments, processing level, ML ingredient signals, and disease-risk heuristics.",
     }
 
 
@@ -489,9 +806,14 @@ def analyze_product(product: Dict[str, Any]) -> Dict[str, Any]:
     ml_output = ml_predict_flags(nutriments)
 
     probs = ml_output.get("ml_feature_probabilities", {}) if ml_output.get("model_ready") else {}
-    health_score = _derive_health_score_from_ml(probs) if probs else 0.0
     disease_risks = _derive_disease_risks_from_ml(probs) if probs else {}
-    processing_level = _derive_processing_level_from_ml(probs) if probs else {
+    health_score = _derive_health_score(nutriments, probs, disease_risks)
+    observed_nova = _safe_float(nutriments.get("nova_group")) if nutriments else 0.0
+
+    processing_level = _derive_processing_level_from_ml(
+        probs,
+        observed_nova_group=observed_nova if observed_nova > 0 else None,
+    ) if probs else {
         "nova_group": "unknown",
         "label": "Unknown",
         "description": "ML model artifacts are not available.",

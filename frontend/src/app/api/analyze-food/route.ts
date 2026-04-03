@@ -21,6 +21,10 @@ export async function POST(req: NextRequest) {
     }
 
     const result = await runMlBridge(args);
+    if (result && typeof result === 'object' && 'error' in result) {
+      const message = String((result as { error?: string }).error || 'Product not found');
+      return NextResponse.json({ error: message }, { status: 404 });
+    }
     return NextResponse.json(result);
   } catch (err) {
     return NextResponse.json({ error: `Analyze failed: ${String(err)}` }, { status: 500 });

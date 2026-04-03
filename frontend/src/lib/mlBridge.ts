@@ -5,24 +5,25 @@ import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 
 function candidatePythonBins(): string[] {
-  // Hardcoded venv path for reliability
-  const hardcodedVenvPath = 'c:\\Users\\Shikhar\\OneDrive\\Desktop\\sem4_projects\\NutriScan\\.venv\\Scripts\\python.exe';
-  
-  // Dynamic resolution as backup
   const frontendDir = path.resolve(process.cwd());
-  const nutriscanDir = path.resolve(frontendDir, '..');
-  const projectRoot = path.resolve(nutriscanDir, '..');
-  const dynamicVenvPath = path.join(projectRoot, '.venv', 'Scripts', 'python.exe');
+  const appRoot = path.resolve(frontendDir, '..');
+  const workspaceRoot = path.resolve(appRoot, '..');
+
+  // Support both common locations:
+  // 1) <repo>/nutriscan-ai/.venv
+  // 2) <workspace>/.venv
+  const venvInApp = path.join(appRoot, '.venv', 'Scripts', 'python.exe');
+  const venvInWorkspace = path.join(workspaceRoot, '.venv', 'Scripts', 'python.exe');
 
   const bins = [
     // Environment variable override
     process.env.PYTHON_BIN,
-    // Hardcoded path (most reliable on Windows)
-    hardcodedVenvPath,
-    // Dynamic path detection
-    dynamicVenvPath,
+    // Windows virtualenv candidates
+    venvInApp,
+    venvInWorkspace,
     // Unix alternatives
-    path.join(projectRoot, '.venv', 'bin', 'python3'),
+    path.join(appRoot, '.venv', 'bin', 'python3'),
+    path.join(workspaceRoot, '.venv', 'bin', 'python3'),
     // System Python
     'python',
     'python3',
