@@ -6,7 +6,7 @@ const BASE_URL = '';
 
 const api = axios.create({
   baseURL: BASE_URL,
-  timeout: 30000,
+  timeout: 45000,
   headers: { 'Content-Type': 'application/json' },
 });
 
@@ -51,7 +51,8 @@ export async function analyzeFood(query: string): Promise<AnalyzeResponse> {
   const body = isBarcode
     ? { barcode: query.trim() }
     : { product_name: query.trim() };
-  const { data } = await api.post('/api/analyze-food', body);
+  // First inference can be slow due to model/OCR warm-up.
+  const { data } = await api.post('/api/analyze-food', body, { timeout: 120000 });
   if (!isAnalyzeResponse(data)) {
     throw new Error(toApiErrorMessage(data, 'Invalid analysis response from server.'));
   }

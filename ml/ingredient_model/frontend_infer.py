@@ -104,6 +104,25 @@ def _to_energy_kcal(nutriments: Dict[str, Any]) -> float:
 def _parse_off_product(product: Dict[str, Any], fallback_code: str = "") -> Dict[str, Any]:
     nutriments = product.get("nutriments", {}) or {}
 
+    availability_checks = {
+        "sugars": nutriments.get("sugars_100g"),
+        "fat": nutriments.get("fat_100g"),
+        "saturated_fat": nutriments.get("saturated-fat_100g"),
+        "salt": nutriments.get("salt_100g"),
+        "fiber": nutriments.get("fiber_100g") or nutriments.get("fibers_100g"),
+        "energy": (
+            nutriments.get("energy-kj_100g")
+            or nutriments.get("energy_100g")
+            or nutriments.get("energy-kcal_100g")
+            or nutriments.get("energy_kcal")
+        ),
+        "additives": product.get("additives_n"),
+        "nova": product.get("nova_group"),
+    }
+    available_fields = sum(1 for v in availability_checks.values() if v not in (None, ""))
+    total_fields = len(availability_checks)
+    completeness = available_fields / total_fields if total_fields else 0.0
+
     normalized = {
         "sugar_100g": _safe_float(nutriments.get("sugars_100g")),
         "fat_100g": _safe_float(nutriments.get("fat_100g")),
@@ -123,6 +142,11 @@ def _parse_off_product(product: Dict[str, Any], fallback_code: str = "") -> Dict
         "product_name": product.get("product_name"),
         "brand": brand,
         "ingredients_text": product.get("ingredients_text"),
+        "data_quality": {
+            "nutriment_completeness": round(float(completeness), 3),
+            "known_fields": available_fields,
+            "total_fields": total_fields,
+        },
         "nutriments": normalized,
     }
 
@@ -171,6 +195,21 @@ def _load_local_df() -> pd.DataFrame:
 
 def _local_row_to_product(row: pd.Series, fallback_code: str = "") -> Dict[str, Any]:
     code = _normalize_barcode(str(row.get("code", ""))) or fallback_code
+
+    availability_checks = {
+        "sugars": row.get("sugars_100g"),
+        "fat": row.get("fat_100g"),
+        "saturated_fat": row.get("saturated_fat_100g"),
+        "salt": row.get("salt_100g"),
+        "fiber": row.get("fiber_100g"),
+        "energy": row.get("energy_kcal_100g"),
+        "additives": row.get("additives_n"),
+        "nova": row.get("nova_group"),
+    }
+    available_fields = sum(1 for v in availability_checks.values() if pd.notna(v) and str(v).strip() != "")
+    total_fields = len(availability_checks)
+    completeness = available_fields / total_fields if total_fields else 0.0
+
     nutriments = {
         "sugar_100g": _safe_float(row.get("sugars_100g")),
         "fat_100g": _safe_float(row.get("fat_100g")),
@@ -186,6 +225,11 @@ def _local_row_to_product(row: pd.Series, fallback_code: str = "") -> Dict[str, 
         "product_name": _safe_text(row.get("product_name")),
         "brand": None,
         "ingredients_text": _safe_text(row.get("ingredients_text")),
+        "data_quality": {
+            "nutriment_completeness": round(float(completeness), 3),
+            "known_fields": int(available_fields),
+            "total_fields": int(total_fields),
+        },
         "nutriments": nutriments,
     }
 
@@ -589,18 +633,19 @@ def _derive_health_score(
     nutriments: Dict[str, float],
     probs: Dict[str, float],
     disease_risks: Dict[str, Dict[str, float]],
+    nutriment_completeness: float,
 ) -> float:
     observed_nova = _safe_float(nutriments.get("nova_group")) if nutriments else 0.0
 
     nutrient_score = _derive_nutrient_quality_score(nutriments)
     processing_score = _derive_processing_quality_score(observed_nova)
-    ml_score = _derive_ml_ingredient_score(probs) if probs else 0.55
+    ml_score = _derive_ml_ingredient_score(probs) if probs else 0.40
 
     if disease_risks:
         avg_disease_risk = float(np.mean([v.get("risk", 0.0) for v in disease_risks.values()]))
         disease_score = float(np.clip(1.0 - avg_disease_risk, 0.0, 1.0))
     else:
-        disease_score = 0.55
+        disease_score = 0.45
 
     combined = (
         (nutrient_score * 0.45)
@@ -608,7 +653,46 @@ def _derive_health_score(
         + (ml_score * 0.20)
         + (disease_score * 0.15)
     )
-    return round(float(np.clip(combined, 0.0, 1.0) * 100.0), 2)
+
+    # Apply targeted penalties so clearly unhealthy profiles cannot remain over-scored.
+    sugar = _safe_float(nutriments.get("sugar_100g"))
+    saturated_fat = _safe_float(nutriments.get("saturated_fat_100g"))
+    salt = _safe_float(nutriments.get("salt_100g"))
+    energy = _safe_float(nutriments.get("energy_kcal"))
+    additives = _safe_float(nutriments.get("additives_count"))
+
+    harmful_ml_signal = (
+        (_prob(probs, "added_sugar") * 0.30)
+        + (_prob(probs, "artificial_color") * 0.20)
+        + (_prob(probs, "preservative") * 0.18)
+        + (_prob(probs, "emulsifier") * 0.16)
+        + (_prob(probs, "palm_oil") * 0.16)
+    ) if probs else 0.0
+
+    risk_penalty = 0.0
+    if observed_nova >= 4:
+        risk_penalty += 12.0
+    if sugar >= 12.0:
+        risk_penalty += 8.0
+    if saturated_fat >= 5.0:
+        risk_penalty += 8.0
+    if salt >= 1.0:
+        risk_penalty += 8.0
+    if energy >= 380.0:
+        risk_penalty += 6.0
+    if additives >= 5.0:
+        risk_penalty += 6.0
+    if harmful_ml_signal >= 0.45:
+        risk_penalty += 8.0
+
+    completeness = float(np.clip(nutriment_completeness, 0.0, 1.0))
+    uncertainty_penalty = (1.0 - completeness) * 22.0
+    score = float(np.clip((combined * 100.0) - uncertainty_penalty - risk_penalty, 0.0, 100.0))
+
+    if completeness < 0.35:
+        score = min(score, 52.0)
+
+    return round(score, 2)
 
 
 def _derive_disease_risks_from_ml(probs: Dict[str, float]) -> Dict[str, Dict[str, float]]:
@@ -803,11 +887,13 @@ def _derive_consumption_disclaimer_from_ml(health_score: float) -> Dict[str, str
 
 def analyze_product(product: Dict[str, Any]) -> Dict[str, Any]:
     nutriments = product["nutriments"]
+    quality = product.get("data_quality", {}) if isinstance(product, dict) else {}
+    completeness = _safe_float(quality.get("nutriment_completeness")) if isinstance(quality, dict) else 0.0
     ml_output = ml_predict_flags(nutriments)
 
     probs = ml_output.get("ml_feature_probabilities", {}) if ml_output.get("model_ready") else {}
     disease_risks = _derive_disease_risks_from_ml(probs) if probs else {}
-    health_score = _derive_health_score(nutriments, probs, disease_risks)
+    health_score = _derive_health_score(nutriments, probs, disease_risks, nutriment_completeness=completeness)
     observed_nova = _safe_float(nutriments.get("nova_group")) if nutriments else 0.0
 
     processing_level = _derive_processing_level_from_ml(
@@ -884,7 +970,7 @@ def main() -> None:
         if args.command == "scan":
             product = fetch_by_barcode(args.barcode)
             if not product:
-                print(json.dumps({"error": "Product not found"}))
+                print(json.dumps({"error": "Product not found", "error_type": "product_not_found"}))
                 return
             print(json.dumps(product))
             return
@@ -898,7 +984,7 @@ def main() -> None:
                 product = results[0] if results else None
 
             if not product:
-                print(json.dumps({"error": "Product not found"}))
+                print(json.dumps({"error": "Product not found", "error_type": "product_not_found"}))
                 return
 
             print(json.dumps(analyze_product(product)))
@@ -915,7 +1001,7 @@ def main() -> None:
             return
 
     except Exception as exc:  # noqa: BLE001
-        print(json.dumps({"error": str(exc)}))
+        print(json.dumps({"error": str(exc), "error_type": "runtime_error"}))
 
 
 if __name__ == "__main__":

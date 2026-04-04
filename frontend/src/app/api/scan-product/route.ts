@@ -2,6 +2,27 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { runMlBridge } from '@/lib/mlBridge';
 
+function mapBridgeErrorStatus(errorType: string, message: string): number {
+  const t = errorType.toLowerCase();
+  const m = message.toLowerCase();
+
+  if (t === 'product_not_found' || m.includes('product not found')) {
+    return 404;
+  }
+
+  if (
+    m.includes('timed out') ||
+    m.includes('timeout') ||
+    m.includes('temporarily unavailable') ||
+    m.includes('connection') ||
+    m.includes('name resolution')
+  ) {
+    return 503;
+  }
+
+  return 500;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -13,8 +34,11 @@ export async function POST(req: NextRequest) {
 
     const product = await runMlBridge(['scan', '--barcode', barcode]);
     if (product && typeof product === 'object' && 'error' in product) {
-      const message = String((product as { error?: string }).error || 'Product not found');
-      return NextResponse.json({ error: message }, { status: 404 });
+      const payload = product as { error?: string; error_type?: string };
+      const message = String(payload.error || 'Scan failed');
+      const errorType = String(payload.error_type || 'bridge_error');
+      const status = mapBridgeErrorStatus(errorType, message);
+      return NextResponse.json({ error: message, error_type: errorType }, { status });
     }
     return NextResponse.json(product);
   } catch (err) {

@@ -218,7 +218,6 @@ Try:
 - Barcode-only crop
 - Manual product name input as fallback
 
----
 
 ## API Endpoints (Frontend Routes)
 

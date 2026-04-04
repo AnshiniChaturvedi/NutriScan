@@ -114,10 +114,14 @@ function DashboardContent() {
               msg = `Product "${query}" not found in database. Try searching with a different product name or barcode number.`;
             } else if (err.response?.status === 422) {
               msg = 'Invalid input. Please enter a valid product name or barcode.';
+            } else if (err.response?.status === 503) {
+              msg = 'Local ML service is still warming up or temporarily unavailable. Wait a few seconds and retry.';
+            } else if (err.code === 'ECONNABORTED') {
+              msg = 'Analysis is taking longer than expected. The ML model may still be loading. Please retry in a few seconds.';
             } else if (!err.response) {
-              msg = 'Cannot connect to the local ML API. Make sure the Next.js frontend dev server is running.';
+              msg = 'Cannot reach the local analysis service. Ensure the Next.js dev server is running and PYTHON_BIN points to a valid venv python.';
             } else {
-              msg = `Server error (${err.response.status}). Please try again.`;
+              msg = getApiErrorMessage(err.response?.data, `Server error (${err.response.status}). Please try again.`);
             }
           } else if (err instanceof Error && err.message.includes('Product not found')) {
             msg = `Product "${query}" not found in OpenFoodFacts database. Try a different product name.`;
