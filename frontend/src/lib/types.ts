@@ -4,6 +4,7 @@ export interface Product {
   barcode: string;
   product_name: string | null;
   brand: string | null;
+  image_url?: string | null;
   ingredients_text: string | null;
   nutriments: Record<string, number>;
 }

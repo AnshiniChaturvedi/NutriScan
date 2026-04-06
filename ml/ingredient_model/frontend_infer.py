@@ -136,11 +136,17 @@ def _parse_off_product(product: Dict[str, Any], fallback_code: str = "") -> Dict
 
     brand_raw = (product.get("brands") or "").strip()
     brand = brand_raw.split(",")[0].strip() if brand_raw else None
+    image_url = (
+        _safe_text(product.get("image_front_url"))
+        or _safe_text(product.get("image_url"))
+        or _safe_text(product.get("image_small_url"))
+    )
 
     return {
         "barcode": str(product.get("code") or fallback_code),
         "product_name": product.get("product_name"),
         "brand": brand,
+        "image_url": image_url,
         "ingredients_text": product.get("ingredients_text"),
         "data_quality": {
             "nutriment_completeness": round(float(completeness), 3),
@@ -224,6 +230,7 @@ def _local_row_to_product(row: pd.Series, fallback_code: str = "") -> Dict[str, 
         "barcode": code,
         "product_name": _safe_text(row.get("product_name")),
         "brand": None,
+        "image_url": _safe_text(row.get("image_url")),
         "ingredients_text": _safe_text(row.get("ingredients_text")),
         "data_quality": {
             "nutriment_completeness": round(float(completeness), 3),
@@ -327,7 +334,7 @@ def search_by_name(name: str, page_size: int = 15) -> List[Dict[str, Any]]:
         "action": "process",
         "json": 1,
         "page_size": page_size,
-        "fields": "code,product_name,brands,ingredients_text,nutriments,additives_n,nova_group",
+        "fields": "code,product_name,brands,image_url,image_front_url,image_small_url,ingredients_text,nutriments,additives_n,nova_group",
     }
     out: List[Dict[str, Any]] = []
     for url in OFF_SEARCH_URLS:

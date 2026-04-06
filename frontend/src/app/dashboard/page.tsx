@@ -4,6 +4,7 @@ import { useEffect, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
+import Image from 'next/image';
 import { ArrowLeft, Package, ExternalLink, AlertCircle } from 'lucide-react';
 import Navbar from '@/components/Navbar';
 import HealthScoreGauge from '@/components/HealthScoreGauge';
@@ -213,9 +214,22 @@ function DashboardContent() {
 
       {/* Product header */}
       <div className="glass rounded-2xl px-6 py-5 flex flex-col sm:flex-row sm:items-center gap-4 mb-8 border border-white/5">
-        <div className="w-12 h-12 rounded-xl bg-white/5 flex items-center justify-center flex-shrink-0">
-          <Package size={22} className="text-slate-400" />
-        </div>
+        {product.image_url ? (
+          <div className="w-full sm:w-auto sm:min-w-[220px] rounded-xl overflow-hidden bg-white/5 border border-white/10 flex items-center justify-center p-2">
+            <Image
+              src={product.image_url}
+              alt={product.product_name ?? 'Product image'}
+              width={440}
+              height={440}
+              className="w-full max-h-[320px] sm:max-h-[360px] h-auto object-contain"
+              unoptimized
+            />
+          </div>
+        ) : (
+          <div className="w-12 h-12 rounded-xl bg-white/5 flex items-center justify-center flex-shrink-0">
+            <Package size={22} className="text-slate-400" />
+          </div>
+        )}
         <div className="flex-1 min-w-0">
           <h1 className="text-xl font-bold text-white truncate">
             {product.product_name ?? 'Unknown Product'}
