@@ -102,9 +102,12 @@ function DashboardContent() {
           // Cache for ChatWrapper to consume without an extra API call
           try { sessionStorage.setItem(`nutriscan_${query}`, JSON.stringify(result)); } catch (_) {}
           // Fire recommendations asynchronously; don't block the main render
-          getRecommendations(query)
-            .then(r => { if (!cancelled) setRecs(r); })
-            .catch(() => {});
+          const recommendationBarcode = result.product?.barcode ?? query;
+          if (recommendationBarcode && recommendationBarcode !== 'image-upload') {
+            getRecommendations(recommendationBarcode)
+              .then(r => { if (!cancelled) setRecs(r); })
+              .catch(() => {});
+          }
         }
       } catch (err: unknown) {
         if (!cancelled) {

@@ -48,6 +48,11 @@ export interface RecommendationItem {
   product: Product;
   health_score: number;
   disease_risks: Record<string, DiseaseRisk>;
+  product_url?: string | null;
+  buy_links?: {
+    label: string;
+    url: string;
+  }[];
 }
 
 // ─── UI Helpers ──────────────────────────────────────────────────────────────

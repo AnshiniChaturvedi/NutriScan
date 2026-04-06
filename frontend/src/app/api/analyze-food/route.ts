@@ -25,12 +25,20 @@ function mapBridgeErrorStatus(errorType: string, message: string): number {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
     const barcode = String(body?.barcode || '').trim();
     const productName = String(body?.product_name || '').trim();
 
     if (!barcode && !productName) {
       return NextResponse.json({ error: "Provide either 'barcode' or 'product_name'." }, { status: 422 });
+    }
+
+    if (barcode && !/^\d{8,14}$/.test(barcode)) {
+      return NextResponse.json({ error: 'Barcode must be 8 to 14 digits.' }, { status: 422 });
+    }
+
+    if (productName && (productName.length < 2 || productName.length > 120)) {
+      return NextResponse.json({ error: 'Product name must be between 2 and 120 characters.' }, { status: 422 });
     }
 
     const args = ['analyze'];

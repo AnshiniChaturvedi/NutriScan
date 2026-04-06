@@ -17,6 +17,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ detail: 'Missing image file.' }, { status: 400 });
     }
 
+    const maxBytes = 8 * 1024 * 1024;
+    if (image.size <= 0 || image.size > maxBytes) {
+      return NextResponse.json(
+        { detail: 'Image size must be between 1 byte and 8 MB.' },
+        { status: 413 },
+      );
+    }
+
     const mimeToExt: Record<string, string> = {
       'image/jpeg': '.jpg',
       'image/jpg': '.jpg',

@@ -25,11 +25,15 @@ function mapBridgeErrorStatus(errorType: string, message: string): number {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
     const barcode = String(body?.barcode || '').trim();
 
     if (!barcode) {
       return NextResponse.json({ error: 'Missing barcode.' }, { status: 400 });
+    }
+
+    if (!/^\d{8,14}$/.test(barcode)) {
+      return NextResponse.json({ error: 'Invalid barcode format. Expected 8 to 14 digits.' }, { status: 422 });
     }
 
     const product = await runMlBridge(['scan', '--barcode', barcode]);

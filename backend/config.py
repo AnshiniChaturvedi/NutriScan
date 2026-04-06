@@ -14,7 +14,10 @@ class Settings(BaseSettings):
 
     # General
     ENV: str = "development"
-    DEBUG: bool = True
+    DEBUG: bool = False
+
+    # Comma-separated list of allowed CORS origins
+    CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
 
     # External APIs
     OPENFOODFACTS_BASE_URL: str = "https://world.openfoodfacts.org/api/v0"
