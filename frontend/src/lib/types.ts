@@ -56,6 +56,48 @@ export interface RecommendationItem {
   }[];
 }
 
+export interface AuthUser {
+  id: string;
+  name: string;
+  email: string;
+  created_at: string;
+  search_count: number;
+}
+
+export interface AuthSession {
+  token_type: 'bearer';
+  access_token: string;
+  user: AuthUser;
+}
+
+export interface LoginRequest {
+  email: string;
+  password: string;
+}
+
+export interface SignupRequest extends LoginRequest {
+  name: string;
+}
+
+export interface SearchHistoryCreate {
+  query: string;
+  query_type: string;
+  product_name?: string | null;
+  barcode?: string | null;
+  result_summary?: Record<string, unknown> | null;
+}
+
+export interface SearchHistoryItem {
+  id: string;
+  user_id: string;
+  query: string;
+  query_type: string;
+  product_name?: string | null;
+  barcode?: string | null;
+  result_summary?: Record<string, unknown> | null;
+  created_at: string;
+}
+
 // ─── UI Helpers ──────────────────────────────────────────────────────────────
 
 export type RiskLevel = 'low' | 'moderate' | 'high' | 'very_high';

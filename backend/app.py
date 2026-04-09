@@ -2,6 +2,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
+from .routes.auth import router as auth_router
+from .services.database import initialize_database
 
 
 def create_app() -> FastAPI:
@@ -33,10 +35,16 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    @app.on_event("startup")
+    def startup_event() -> None:
+        initialize_database()
+
     @app.get("/health", tags=["system"])
     async def health_check():
         """Basic health check endpoint."""
         return {"status": "ok", "service": "nutriscan-ai-backend"}
+
+    app.include_router(auth_router)
 
     return app
 

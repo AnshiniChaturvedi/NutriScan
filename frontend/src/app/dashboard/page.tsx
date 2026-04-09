@@ -18,6 +18,7 @@ import RecommendationSection from '@/components/RecommendationSection';
 import ChatAssistant from '@/components/ChatAssistant';
 import axios from 'axios';
 import { analyzeFood, getRecommendations } from '@/lib/api';
+import { recordSearch } from '@/lib/auth';
 import { AnalyzeResponse, RecommendationItem } from '@/lib/types';
 
 function isAnalyzeResponse(value: unknown): value is AnalyzeResponse {
@@ -69,6 +70,16 @@ function DashboardContent() {
           const parsed = JSON.parse(cached) as unknown;
           if (isAnalyzeResponse(parsed)) {
             setData(parsed);
+            void recordSearch({
+              query: 'image-upload',
+              query_type: 'image_search',
+              product_name: parsed.product?.product_name ?? null,
+              barcode: parsed.product?.barcode ?? 'image-upload',
+              result_summary: {
+                health_score: parsed.health_score,
+                processing_level: parsed.processing_level?.label,
+              },
+            });
           } else {
             setError(getApiErrorMessage(parsed, 'Image analysis did not return product data. Please try another image.'));
           }
@@ -102,6 +113,18 @@ function DashboardContent() {
           setData(result);
           // Cache for ChatWrapper to consume without an extra API call
           try { sessionStorage.setItem(`nutriscan_${query}`, JSON.stringify(result)); } catch (_) {}
+          void recordSearch({
+            query,
+            query_type: barcode ? 'barcode_search' : 'product_search',
+            product_name: result.product?.product_name ?? null,
+            barcode: result.product?.barcode ?? (barcode || null),
+            result_summary: {
+              health_score: result.health_score,
+              product_name: result.product?.product_name,
+              brand: result.product?.brand,
+              processing_level: result.processing_level?.label,
+            },
+          });
           // Fire recommendations asynchronously; don't block the main render
           const recommendationBarcode = result.product?.barcode ?? query;
           if (recommendationBarcode && recommendationBarcode !== 'image-upload') {

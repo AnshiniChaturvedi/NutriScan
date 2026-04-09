@@ -4,12 +4,15 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Scan, Activity, Menu, X, Zap } from 'lucide-react';
+import { Scan, Menu, X, Zap, LogOut } from 'lucide-react';
+
+import { useAuth } from '@/components/AuthProvider';
 
 export default function Navbar() {
   const [scrolled, setScrolled]   = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
+  const { user, loading, logout } = useAuth();
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 20);
@@ -21,6 +24,15 @@ export default function Navbar() {
     { href: '/',       label: 'Home' },
     { href: '/scan',   label: 'Scan Food' },
   ];
+
+  const authLinks = user
+    ? [
+        { href: '/account', label: 'Account' },
+      ]
+    : [
+        { href: '/login', label: 'Sign in' },
+        { href: '/signup', label: 'Create account' },
+      ];
 
   return (
     <motion.nav
@@ -62,6 +74,37 @@ export default function Navbar() {
                 {link.label}
               </Link>
             ))}
+
+            {!loading && authLinks.map((link) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                  pathname === link.href
+                    ? 'bg-white/10 text-white'
+                    : 'text-white/60 hover:text-white hover:bg-white/5'
+                }`}
+              >
+                {link.label}
+              </Link>
+            ))}
+
+            {!loading && user && (
+              <button
+                type="button"
+                onClick={async () => {
+                  await logout();
+                  if (pathname === '/account') {
+                    window.location.href = '/';
+                  }
+                }}
+                className="ml-1 flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white/60 hover:text-white hover:bg-white/5 transition-all duration-200"
+              >
+                <LogOut className="w-4 h-4" />
+                Sign out
+              </button>
+            )}
+
             <Link
               href="/scan"
               className="ml-3 flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-brand-green to-emerald-400 text-black font-semibold text-sm shadow-glow hover:shadow-[0_0_50px_rgba(34,197,94,0.4)] transition-all duration-300 hover:scale-105"
@@ -105,6 +148,38 @@ export default function Navbar() {
                 {link.label}
               </Link>
             ))}
+
+            {!loading && authLinks.map((link) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                onClick={() => setMobileOpen(false)}
+                className={`block px-4 py-3 rounded-lg my-1 text-sm font-medium transition-colors ${
+                  pathname === link.href
+                    ? 'bg-white/10 text-white'
+                    : 'text-white/60 hover:text-white hover:bg-white/5'
+                }`}
+              >
+                {link.label}
+              </Link>
+            ))}
+
+            {!loading && user && (
+              <button
+                type="button"
+                onClick={async () => {
+                  await logout();
+                  setMobileOpen(false);
+                  if (pathname === '/account') {
+                    window.location.href = '/';
+                  }
+                }}
+                className="block w-full px-4 py-3 rounded-lg my-1 text-sm font-medium text-white/60 hover:text-white hover:bg-white/5 transition-colors text-left"
+              >
+                Sign out
+              </button>
+            )}
+
             <Link
               href="/scan"
               onClick={() => setMobileOpen(false)}

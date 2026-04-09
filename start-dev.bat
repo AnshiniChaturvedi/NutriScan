@@ -13,10 +13,20 @@ if not exist "%PYTHON_BIN%" (
 )
 
 set "PYTHONWARNINGS=ignore"
+set "BACKEND_PORT=8000"
+set "BACKEND_HOST=127.0.0.1"
 
 if not exist "%APP_DIR%\frontend\package.json" (
 	echo [ERROR] Cannot find frontend\package.json under "%APP_DIR%".
 	exit /b 1
+)
+
+cd /d "%APP_DIR%"
+
+if exist "%PYTHON_BIN%" (
+	start "NutriScan Backend" cmd /c ""%PYTHON_BIN%" -m uvicorn backend.app:app --reload --host %BACKEND_HOST% --port %BACKEND_PORT%"
+) else (
+	echo [WARN] Backend server was not started because Python was not found.
 )
 
 cd /d "%APP_DIR%\frontend"
@@ -28,6 +38,7 @@ echo ============================================================
 echo.
 echo Python executable: %PYTHON_BIN%
 echo Frontend directory: %cd%
+echo Backend host: %BACKEND_HOST%:%BACKEND_PORT%
 if not exist "%PYTHON_BIN%" (
 	echo [WARN] Python venv executable not found at configured path.
 	echo [WARN] ML routes may fail until a valid venv is available.
@@ -40,6 +51,6 @@ echo Note: First request may be slower due to OCR model loading (30-60s).
 echo Press Ctrl+C to stop the server.
 echo ============================================================
 echo.
-npm run dev
+npm run dev -- --hostname 0.0.0.0
 
 endlocal

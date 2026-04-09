@@ -22,6 +22,15 @@ class Settings(BaseSettings):
     # External APIs
     OPENFOODFACTS_BASE_URL: str = "https://world.openfoodfacts.org/api/v0"
 
+    # Database
+    DATABASE_PATH: str = "data/nutriscan.db"
+
+    # Authentication
+    JWT_SECRET_KEY: str = "change-this-secret-in-production"
+    JWT_ISSUER: str = "nutriscan-ai"
+    JWT_AUDIENCE: str = "nutriscan-users"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7
+
     # LLM / Gemini
     GEMINI_API_KEY: Optional[str] = None
     GEMINI_MODEL: str = "models/gemini-2.0-flash"

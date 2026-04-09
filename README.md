@@ -10,10 +10,13 @@ NutriScan AI is a food analysis web app that helps users understand packaged pro
 - Health score and disease-risk insights
 - Healthier alternative recommendations with buy links
 - Chat assistant for nutrition guidance
+- Account signup/login with persistent search history
+- SQLite-backed user and search storage
 
 ## Tech Stack
 
 - Frontend: Next.js, React, Tailwind CSS
+- Backend: FastAPI, SQLite
 - ML/Data: Python, scikit-learn, XGBoost, EasyOCR
 - Data source: Open Food Facts
 
@@ -47,6 +50,15 @@ start-dev.bat
 
 App URL: http://localhost:3000
 
+Backend API: http://127.0.0.1:8000
+
+Create a `.env` file in `nutriscan-ai/` if you want custom values:
+
+```env
+JWT_SECRET_KEY=replace-with-a-long-random-string
+NEXT_PUBLIC_BACKEND_URL=http://127.0.0.1:8000
+```
+
 ## API Routes
 
 - POST /api/scan-product
@@ -54,6 +66,12 @@ App URL: http://localhost:3000
 - POST /api/analyze-image
 - GET /api/recommendations
 - POST /api/chat
+- POST /api/auth/signup
+- POST /api/auth/login
+- POST /api/auth/logout
+- GET /api/auth/me
+- GET /api/auth/history
+- POST /api/auth/history
 
 ## License
 

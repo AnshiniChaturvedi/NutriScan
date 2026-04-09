@@ -93,6 +93,24 @@ def _safe_float(v: Any) -> float:
         return 0.0
 
 
+def _contains_palm_oil(ingredients_text: Optional[str]) -> bool:
+    text = (ingredients_text or "").lower()
+    if not text:
+        return False
+
+    palm_patterns = [
+        r"\bpalm\s*oil\b",
+        r"\bpalm\s*kernel\b",
+        r"\bpalm\s*fat\b",
+        r"\bpalmolein\b",
+        r"\bhuile\s+de\s+palme\b",
+        r"\bhuile\s+de\s+palmiste\b",
+        r"\bpalma\b",
+        r"\baceite\s+de\s+palma\b",
+    ]
+    return any(re.search(pattern, text) for pattern in palm_patterns)
+
+
 def _to_energy_kcal(nutriments: Dict[str, Any]) -> float:
     kj = _safe_float(nutriments.get("energy-kj_100g") or nutriments.get("energy_100g"))
     if kj > 10:
@@ -641,6 +659,7 @@ def _derive_health_score(
     probs: Dict[str, float],
     disease_risks: Dict[str, Dict[str, float]],
     nutriment_completeness: float,
+    has_palm_oil: bool,
 ) -> float:
     observed_nova = _safe_float(nutriments.get("nova_group")) if nutriments else 0.0
 
@@ -691,6 +710,8 @@ def _derive_health_score(
         risk_penalty += 6.0
     if harmful_ml_signal >= 0.45:
         risk_penalty += 8.0
+    if has_palm_oil:
+        risk_penalty += 6.0
 
     completeness = float(np.clip(nutriment_completeness, 0.0, 1.0))
     uncertainty_penalty = (1.0 - completeness) * 22.0
@@ -699,32 +720,77 @@ def _derive_health_score(
     if completeness < 0.35:
         score = min(score, 52.0)
 
+    # Avoid hard 0 for products with sufficient data; reserve zero for totally unknown/broken cases.
+    has_nutrient_signal = any(
+        _safe_float(nutriments.get(k)) > 0.0
+        for k in (
+            "sugar_100g",
+            "fat_100g",
+            "saturated_fat_100g",
+            "salt_100g",
+            "energy_kcal",
+            "additives_count",
+            "fiber_100g",
+        )
+    )
+    if completeness >= 0.5 and has_nutrient_signal:
+        score = max(score, 4.0)
+
     return round(score, 2)
 
 
-def _derive_disease_risks_from_ml(probs: Dict[str, float]) -> Dict[str, Dict[str, float]]:
+def _derive_disease_risks_from_ml(
+    probs: Dict[str, float],
+    nutriments: Dict[str, float],
+    has_palm_oil: bool,
+) -> Dict[str, Dict[str, float]]:
+    sugar = _safe_float(nutriments.get("sugar_100g"))
+    saturated_fat = _safe_float(nutriments.get("saturated_fat_100g"))
+    fat = _safe_float(nutriments.get("fat_100g"))
+    salt = _safe_float(nutriments.get("salt_100g"))
+    energy = _safe_float(nutriments.get("energy_kcal"))
+
+    sugar_signal = _clamp_ratio(sugar, 5.0, 30.0)
+    sat_fat_signal = _clamp_ratio(saturated_fat, 1.5, 10.0)
+    fat_signal = _clamp_ratio(fat, 3.0, 35.0)
+    salt_signal = _clamp_ratio(salt, 0.3, 2.2)
+    energy_signal = _clamp_ratio(energy, 120.0, 600.0)
+
     diabetes = (
-        (_prob(probs, "added_sugar") * 0.7)
-        + (_prob(probs, "artificial_flavor") * 0.15)
-        + (_prob(probs, "emulsifier") * 0.15)
+        (sugar_signal * 0.48)
+        + (_prob(probs, "added_sugar") * 0.32)
+        + (_prob(probs, "artificial_flavor") * 0.10)
+        + (_prob(probs, "emulsifier") * 0.10)
     )
     heart = (
-        (_prob(probs, "palm_oil") * 0.4)
-        + (_prob(probs, "added_sugar") * 0.25)
-        + (_prob(probs, "preservative") * 0.2)
-        + (_prob(probs, "emulsifier") * 0.15)
+        (sat_fat_signal * 0.35)
+        + (salt_signal * 0.20)
+        + (_prob(probs, "preservative") * 0.12)
+        + (_prob(probs, "emulsifier") * 0.10)
+        + (_prob(probs, "palm_oil") * 0.23)
     )
     obesity = (
-        (_prob(probs, "added_sugar") * 0.6)
-        + (_prob(probs, "palm_oil") * 0.25)
-        + (_prob(probs, "artificial_flavor") * 0.15)
+        (sugar_signal * 0.26)
+        + (fat_signal * 0.26)
+        + (energy_signal * 0.26)
+        + (_prob(probs, "added_sugar") * 0.14)
+        + (_prob(probs, "palm_oil") * 0.08)
     )
     hypertension = (
-        (_prob(probs, "preservative") * 0.45)
-        + (_prob(probs, "emulsifier") * 0.25)
-        + (_prob(probs, "added_sugar") * 0.2)
-        + (_prob(probs, "artificial_color") * 0.1)
+        (salt_signal * 0.55)
+        + (_prob(probs, "preservative") * 0.25)
+        + (_prob(probs, "emulsifier") * 0.10)
+        + (_prob(probs, "artificial_color") * 0.10)
     )
+
+    if has_palm_oil:
+        heart += 0.20
+        obesity += 0.12
+
+    if has_palm_oil:
+        # Palm oil should push heart/obesity concerns into higher risk territory.
+        heart = max(heart, 0.68)
+        obesity = max(obesity, 0.60)
 
     risks = {
         "diabetes": float(np.clip(diabetes, 0.0, 1.0)),
@@ -894,13 +960,21 @@ def _derive_consumption_disclaimer_from_ml(health_score: float) -> Dict[str, str
 
 def analyze_product(product: Dict[str, Any]) -> Dict[str, Any]:
     nutriments = product["nutriments"]
+    ingredients_text = str(product.get("ingredients_text") or "")
+    has_palm_oil = _contains_palm_oil(ingredients_text)
     quality = product.get("data_quality", {}) if isinstance(product, dict) else {}
     completeness = _safe_float(quality.get("nutriment_completeness")) if isinstance(quality, dict) else 0.0
     ml_output = ml_predict_flags(nutriments)
 
     probs = ml_output.get("ml_feature_probabilities", {}) if ml_output.get("model_ready") else {}
-    disease_risks = _derive_disease_risks_from_ml(probs) if probs else {}
-    health_score = _derive_health_score(nutriments, probs, disease_risks, nutriment_completeness=completeness)
+    disease_risks = _derive_disease_risks_from_ml(probs, nutriments, has_palm_oil) if probs else {}
+    health_score = _derive_health_score(
+        nutriments,
+        probs,
+        disease_risks,
+        nutriment_completeness=completeness,
+        has_palm_oil=has_palm_oil,
+    )
     observed_nova = _safe_float(nutriments.get("nova_group")) if nutriments else 0.0
 
     processing_level = _derive_processing_level_from_ml(
@@ -924,6 +998,9 @@ def analyze_product(product: Dict[str, Any]) -> Dict[str, Any]:
         "age_group_impacts": age_group_impacts,
         "consumption_disclaimer": consumption_disclaimer,
         "ingredient_analysis": None,
+        "ingredient_flags": {
+            "contains_palm_oil": has_palm_oil,
+        },
         **ml_output,
     }
 
@@ -933,13 +1010,51 @@ def recommendations_for(barcode: str, limit: int = 4) -> List[Dict[str, Any]]:
     if not base:
         return []
 
-    query = (base.get("product_name") or "").split(" ")[0] or barcode
-    candidates = search_by_name(query, page_size=30)
+    product_name = str(base.get("product_name") or "").strip()
+    words = [w for w in re.findall(r"[A-Za-z0-9]{3,}", product_name) if w]
+    queries: List[str] = []
+    if len(words) >= 2:
+        queries.append(" ".join(words[:2]))
+    if words:
+        queries.append(words[0])
+    if product_name:
+        queries.append(product_name)
+    queries.append(barcode)
+
+    dedup_queries: List[str] = []
+    seen_queries = set()
+    for q in queries:
+        qn = q.strip().lower()
+        if qn and qn not in seen_queries:
+            dedup_queries.append(q)
+            seen_queries.add(qn)
+
+    candidates: List[Dict[str, Any]] = []
+    seen_barcodes = set()
+    for q in dedup_queries:
+        items = search_by_name(q, page_size=60)
+        for item in items:
+            item_barcode = str(item.get("barcode") or "").strip()
+            key = item_barcode or str(item.get("product_name") or "").strip().lower()
+            if key and key not in seen_barcodes:
+                candidates.append(item)
+                seen_barcodes.add(key)
+
+        if len(candidates) >= 120:
+            break
 
     ranked: List[Dict[str, Any]] = []
+    base_score = _safe_float(analyze_product(base).get("health_score"))
     for item in candidates:
         if item.get("barcode") == barcode:
             continue
+
+        item_quality = item.get("data_quality", {}) if isinstance(item, dict) else {}
+        completeness = _safe_float(item_quality.get("nutriment_completeness")) if isinstance(item_quality, dict) else 0.0
+        known_fields = int(_safe_float(item_quality.get("known_fields"))) if isinstance(item_quality, dict) else 0
+        if completeness < 0.5 or known_fields < 4:
+            continue
+
         analyzed = analyze_product(item)
         ranked.append(
             {
@@ -950,6 +1065,11 @@ def recommendations_for(barcode: str, limit: int = 4) -> List[Dict[str, Any]]:
         )
 
     ranked.sort(key=lambda x: x["health_score"], reverse=True)
+
+    healthier = [r for r in ranked if _safe_float(r.get("health_score")) >= (base_score + 2.0)]
+    if len(healthier) >= limit:
+        return healthier[:limit]
+
     return ranked[:limit]
 
 
