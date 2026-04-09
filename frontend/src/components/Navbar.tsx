@@ -30,8 +30,8 @@ export default function Navbar() {
         { href: '/account', label: 'Account' },
       ]
     : [
-        { href: '/login', label: 'Sign in' },
-        { href: '/signup', label: 'Create account' },
+        { href: '/login', label: 'Login' },
+        { href: '/signup', label: 'Sign Up' },
       ];
 
   return (
