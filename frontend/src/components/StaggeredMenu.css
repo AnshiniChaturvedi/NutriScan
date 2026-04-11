@@ -1,0 +1,44 @@
+.staggered-menu__toggle {
+  transition: transform 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.staggered-menu__toggle--shifted {
+  transform: translateX(calc(-1 * clamp(260px, 38vw, 420px)));
+}
+
+.staggered-menu__panel {
+  width: clamp(260px, 38vw, 420px);
+}
+
+@media (max-width: 1024px) {
+  .staggered-menu__panel {
+    width: 100vw;
+  }
+}
+
+.staggered-menu__items {
+  counter-reset: menu-counter;
+}
+
+.staggered-menu__item {
+  counter-increment: menu-counter;
+}
+
+.staggered-menu__item::before {
+  content: counter(menu-counter, decimal-leading-zero);
+  font-size: 0.75rem;
+  letter-spacing: 0.3em;
+  color: var(--accent);
+  display: inline-block;
+  width: 3.5rem;
+  transform: translateY(-0.25rem);
+}
+
+.staggered-menu__social-link {
+  transition: opacity 0.2s ease;
+}
+
+.staggered-menu__social-link:hover {
+  opacity: 0.6;
+}
+

@@ -10,9 +10,7 @@ const config: Config = {
     extend: {
       colors: {
         brand: {
-          green: '#22c55e',
-          blue: '#3b82f6',
-          purple: '#a855f7',
+          accent: '#93c5fd',
         },
         surface: {
           DEFAULT: 'rgba(255,255,255,0.04)',
@@ -25,7 +23,8 @@ const config: Config = {
         },
       },
       fontFamily: {
-        sans: ['var(--font-inter)', 'system-ui', 'sans-serif'],
+        sans: ['var(--font-sans)', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        serif: ['var(--font-serif)', 'ui-serif', 'serif'],
       },
       backgroundImage: {
         'gradient-radial': 'radial-gradient(var(--tw-gradient-stops))',
@@ -34,8 +33,7 @@ const config: Config = {
       },
       boxShadow: {
         glass: '0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.08)',
-        glow: '0 0 40px rgba(34,197,94,0.2)',
-        'glow-blue': '0 0 40px rgba(59,130,246,0.2)',
+        glow: '0 0 40px rgba(147,197,253,0.2)',
         'glow-red': '0 0 30px rgba(239,68,68,0.2)',
       },
       animation: {

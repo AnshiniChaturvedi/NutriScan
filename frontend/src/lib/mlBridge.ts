@@ -1,34 +1,46 @@
 import { execFile } from 'node:child_process';
 import * as path from 'path';
 import { promisify } from 'node:util';
+import * as fs from 'node:fs';
 
 const execFileAsync = promisify(execFile);
 
-function candidatePythonBins(): string[] {
-  // Hardcoded venv path for reliability
-  const hardcodedVenvPath = 'c:\\Users\\Shikhar\\OneDrive\\Desktop\\sem4_projects\\NutriScan\\.venv\\Scripts\\python.exe';
-  
-  // Dynamic resolution as backup
+type PythonCandidate = {
+  bin: string;
+  prefixArgs: string[];
+};
+
+function candidatePythonBins(): PythonCandidate[] {
+  // Repo layout assumption:
+  // - this runs in `frontend/`
+  // - project root is `../` (NutriScan)
   const frontendDir = path.resolve(process.cwd());
-  const nutriscanDir = path.resolve(frontendDir, '..');
-  const projectRoot = path.resolve(nutriscanDir, '..');
-  const dynamicVenvPath = path.join(projectRoot, '.venv', 'Scripts', 'python.exe');
+  const projectRoot = path.resolve(frontendDir, '..');
 
-  const bins = [
-    // Environment variable override
-    process.env.PYTHON_BIN,
-    // Hardcoded path (most reliable on Windows)
-    hardcodedVenvPath,
-    // Dynamic path detection
-    dynamicVenvPath,
-    // Unix alternatives
-    path.join(projectRoot, '.venv', 'bin', 'python3'),
-    // System Python
-    'python',
-    'python3',
-  ].filter(Boolean) as string[];
+  const winVenv = path.join(projectRoot, '.venv', 'Scripts', 'python.exe');
+  const unixVenv = path.join(projectRoot, '.venv', 'bin', 'python3');
 
-  return bins;
+  const candidates: PythonCandidate[] = [];
+
+  // 1) Explicit env var (supports full path)
+  if (process.env.PYTHON_BIN) candidates.push({ bin: process.env.PYTHON_BIN, prefixArgs: [] });
+
+  // 2) Project venv (best on Windows)
+  if (fs.existsSync(winVenv)) candidates.push({ bin: winVenv, prefixArgs: [] });
+
+  // 3) Project venv (unix)
+  if (fs.existsSync(unixVenv)) candidates.push({ bin: unixVenv, prefixArgs: [] });
+
+  // 4) Windows Python launcher (avoids Microsoft Store "python"/"python3" alias issues)
+  if (process.platform === 'win32') {
+    candidates.push({ bin: 'py', prefixArgs: ['-3'] });
+  }
+
+  // 5) System Python fallbacks
+  candidates.push({ bin: 'python', prefixArgs: [] });
+  candidates.push({ bin: 'python3', prefixArgs: [] });
+
+  return candidates;
 }
 
 function scriptPath(): string {
@@ -41,9 +53,9 @@ export async function runMlBridge(args: string[]): Promise<any> {
 
   let lastError: unknown = null;
 
-  for (const bin of bins) {
+  for (const cand of bins) {
     try {
-      const { stdout, stderr } = await execFileAsync(bin, [script, ...args], {
+      const { stdout, stderr } = await execFileAsync(cand.bin, [...cand.prefixArgs, script, ...args], {
         cwd: path.resolve(process.cwd(), '..'),
         timeout: 300000,
         windowsHide: true,
@@ -72,7 +84,7 @@ export async function runMlBridge(args: string[]): Promise<any> {
       return parsed;
     } catch (err) {
       lastError = err;
-      console.error(`[ML Bridge] Failed with ${bin}: ${err}`);
+      console.error(`[ML Bridge] Failed with ${cand.bin}: ${err}`);
     }
   }
 

@@ -1,10 +1,10 @@
 @echo off
 REM Set Python binary path for ML bridge
-set PYTHON_BIN=c:\Users\Shikhar\OneDrive\Desktop\sem4_projects\NutriScan\.venv\Scripts\python.exe
+set PYTHON_BIN=C:\Users\twrsh\OneDrive\Attachments\NutriScan\.venv\Scripts\python.exe
 set PYTHONWARNINGS=ignore
 
 REM Change to frontend directory
-cd /d "c:\Users\Shikhar\OneDrive\Desktop\sem4_projects\NutriScan\nutriscan-ai\frontend"
+cd /d "C:\Users\twrsh\OneDrive\Attachments\NutriScan\frontend"
 
 REM Start dev server on port 3000 (default)
 echo ============================================================
