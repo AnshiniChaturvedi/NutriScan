@@ -1,10 +1,36 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-export async function POST(req: NextRequest) {
-  const { question, productContext } = await req.json();
+type ChatProductContext = {
+  product?: {
+    product_name?: string | null;
+    brand?: string | null;
+    nutriments?: Record<string, number>;
+  };
+  health_score?: number;
+  disease_risks?: Record<string, unknown>;
+  processing_level?: {
+    label?: string;
+  };
+};
 
-  if (!question || typeof question !== 'string') {
+function toProductContext(value: unknown): ChatProductContext | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  return value as ChatProductContext;
+}
+
+export async function POST(req: NextRequest) {
+  const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+  const question = String(body.question ?? '').trim();
+  const productContext = toProductContext(body.productContext);
+
+  if (!question) {
     return NextResponse.json({ error: 'Missing question.' }, { status: 400 });
+  }
+
+  if (question.length > 500) {
+    return NextResponse.json({ error: 'Question is too long. Keep it under 500 characters.' }, { status: 422 });
   }
 
   const apiKey = process.env.GEMINI_API_KEY;
@@ -30,6 +56,8 @@ User question: ${question}
 Answer in 2-4 sentences, focusing on practical health advice. Do not fabricate specific data not in the context.`;
 
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
       {
@@ -39,8 +67,9 @@ Answer in 2-4 sentences, focusing on practical health advice. Do not fabricate s
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: { temperature: 0.4, maxOutputTokens: 400 },
         }),
+        signal: controller.signal,
       }
-    );
+    ).finally(() => clearTimeout(timeout));
 
     if (!res.ok) {
       const err = await res.text();

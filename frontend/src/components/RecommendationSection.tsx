@@ -3,7 +3,7 @@
 import { motion } from 'framer-motion';
 import { RecommendationItem } from '@/lib/types';
 import { healthScoreColor, healthScoreLabel } from '@/lib/api';
-import { Sparkles, ChevronRight } from 'lucide-react';
+import { Sparkles, ChevronRight, ExternalLink } from 'lucide-react';
 
 interface RecommendationSectionProps {
   items: RecommendationItem[];
@@ -17,11 +17,12 @@ function RecommendationCard({ item }: RecommendationCardProps) {
   const score = item.health_score ?? 0;
   const color = healthScoreColor(score);
   const label = healthScoreLabel(score);
+  const buyLinks = item.buy_links ?? [];
 
   return (
     <motion.div
       variants={{ hidden: { opacity: 0, x: 30 }, show: { opacity: 1, x: 0 } }}
-      className="glass rounded-xl p-5 flex flex-col gap-4 min-w-[220px] max-w-[240px] flex-shrink-0 hover:border-green-500/30 transition-colors duration-200 cursor-pointer"
+      className="glass rounded-xl p-5 flex flex-col gap-4 min-w-[240px] max-w-[280px] flex-shrink-0 hover:border-green-500/30 transition-colors duration-200"
       whileHover={{ scale: 1.02 }}
     >
       {/* Score badge */}
@@ -45,6 +46,36 @@ function RecommendationCard({ item }: RecommendationCardProps) {
       >
         {label}
       </div>
+
+      <p className="text-xs text-slate-400">
+        Health Score: <span className="font-semibold" style={{ color }}>{score}/100</span>
+      </p>
+
+      <div className="flex flex-wrap gap-2">
+        {buyLinks.slice(0, 3).map((link) => (
+          <a
+            key={`${item.product?.barcode ?? 'item'}-${link.label}`}
+            href={link.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[11px] px-2.5 py-1 rounded-full bg-white/5 text-slate-300 hover:bg-green-500/20 hover:text-green-300 transition-colors"
+          >
+            Buy on {link.label}
+          </a>
+        ))}
+      </div>
+
+      {item.product_url && (
+        <a
+          href={item.product_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-300 transition-colors"
+        >
+          <ExternalLink size={12} />
+          Product details
+        </a>
+      )}
     </motion.div>
   );
 }

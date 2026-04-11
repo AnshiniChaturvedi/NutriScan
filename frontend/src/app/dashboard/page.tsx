@@ -4,6 +4,7 @@ import { useEffect, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
+import Image from 'next/image';
 import { ArrowLeft, Package, ExternalLink, AlertCircle } from 'lucide-react';
 import Navbar from '@/components/Navbar';
 import HealthScoreGauge from '@/components/HealthScoreGauge';
@@ -17,6 +18,7 @@ import RecommendationSection from '@/components/RecommendationSection';
 import ChatAssistant from '@/components/ChatAssistant';
 import axios from 'axios';
 import { analyzeFood, getRecommendations } from '@/lib/api';
+import { recordSearch } from '@/lib/auth';
 import { AnalyzeResponse, RecommendationItem } from '@/lib/types';
 
 function isAnalyzeResponse(value: unknown): value is AnalyzeResponse {
@@ -68,6 +70,16 @@ function DashboardContent() {
           const parsed = JSON.parse(cached) as unknown;
           if (isAnalyzeResponse(parsed)) {
             setData(parsed);
+            void recordSearch({
+              query: 'image-upload',
+              query_type: 'image_search',
+              product_name: parsed.product?.product_name ?? null,
+              barcode: parsed.product?.barcode ?? 'image-upload',
+              result_summary: {
+                health_score: parsed.health_score,
+                processing_level: parsed.processing_level?.label,
+              },
+            });
           } else {
             setError(getApiErrorMessage(parsed, 'Image analysis did not return product data. Please try another image.'));
           }
@@ -101,10 +113,25 @@ function DashboardContent() {
           setData(result);
           // Cache for ChatWrapper to consume without an extra API call
           try { sessionStorage.setItem(`nutriscan_${query}`, JSON.stringify(result)); } catch (_) {}
+          void recordSearch({
+            query,
+            query_type: barcode ? 'barcode_search' : 'product_search',
+            product_name: result.product?.product_name ?? null,
+            barcode: result.product?.barcode ?? (barcode || null),
+            result_summary: {
+              health_score: result.health_score,
+              product_name: result.product?.product_name,
+              brand: result.product?.brand,
+              processing_level: result.processing_level?.label,
+            },
+          });
           // Fire recommendations asynchronously; don't block the main render
-          getRecommendations(query)
-            .then(r => { if (!cancelled) setRecs(r); })
-            .catch(() => {});
+          const recommendationBarcode = result.product?.barcode ?? query;
+          if (recommendationBarcode && recommendationBarcode !== 'image-upload') {
+            getRecommendations(recommendationBarcode)
+              .then(r => { if (!cancelled) setRecs(r); })
+              .catch(() => {});
+          }
         }
       } catch (err: unknown) {
         if (!cancelled) {
@@ -114,10 +141,14 @@ function DashboardContent() {
               msg = `Product "${query}" not found in database. Try searching with a different product name or barcode number.`;
             } else if (err.response?.status === 422) {
               msg = 'Invalid input. Please enter a valid product name or barcode.';
+            } else if (err.response?.status === 503) {
+              msg = 'Local ML service is still warming up or temporarily unavailable. Wait a few seconds and retry.';
+            } else if (err.code === 'ECONNABORTED') {
+              msg = 'Analysis is taking longer than expected. The ML model may still be loading. Please retry in a few seconds.';
             } else if (!err.response) {
-              msg = 'Cannot connect to the local ML API. Make sure the Next.js frontend dev server is running.';
+              msg = 'Cannot reach the local analysis service. Ensure the Next.js dev server is running and PYTHON_BIN points to a valid venv python.';
             } else {
-              msg = `Server error (${err.response.status}). Please try again.`;
+              msg = getApiErrorMessage(err.response?.data, `Server error (${err.response.status}). Please try again.`);
             }
           } else if (err instanceof Error && err.message.includes('Product not found')) {
             msg = `Product "${query}" not found in OpenFoodFacts database. Try a different product name.`;
@@ -206,9 +237,22 @@ function DashboardContent() {
 
       {/* Product header */}
       <div className="glass rounded-2xl px-6 py-5 flex flex-col sm:flex-row sm:items-center gap-4 mb-8 border border-white/5">
-        <div className="w-12 h-12 rounded-xl bg-white/5 flex items-center justify-center flex-shrink-0">
-          <Package size={22} className="text-slate-400" />
-        </div>
+        {product.image_url ? (
+          <div className="w-full sm:w-auto sm:min-w-[220px] rounded-xl overflow-hidden bg-white/5 border border-white/10 flex items-center justify-center p-2">
+            <Image
+              src={product.image_url}
+              alt={product.product_name ?? 'Product image'}
+              width={440}
+              height={440}
+              className="w-full max-h-[320px] sm:max-h-[360px] h-auto object-contain"
+              unoptimized
+            />
+          </div>
+        ) : (
+          <div className="w-12 h-12 rounded-xl bg-white/5 flex items-center justify-center flex-shrink-0">
+            <Package size={22} className="text-slate-400" />
+          </div>
+        )}
         <div className="flex-1 min-w-0">
           <h1 className="text-xl font-bold text-white truncate">
             {product.product_name ?? 'Unknown Product'}
