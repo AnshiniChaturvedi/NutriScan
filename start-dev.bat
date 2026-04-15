@@ -1,35 +1,10 @@
 @echo off
-setlocal
+REM Set Python binary path for ML bridge
+set PYTHON_BIN=C:\Users\twrsh\OneDrive\Attachments\NutriScan\.venv\Scripts\python.exe
+set PYTHONWARNINGS=ignore
 
-REM Resolve paths dynamically so this script works from any current directory.
-set "APP_DIR=%~dp0"
-if "%APP_DIR:~-1%"=="\" set "APP_DIR=%APP_DIR:~0,-1%"
-
-for %%I in ("%APP_DIR%\..") do set "WORKSPACE_DIR=%%~fI"
-
-set "PYTHON_BIN=%WORKSPACE_DIR%\.venv\Scripts\python.exe"
-if not exist "%PYTHON_BIN%" (
-	set "PYTHON_BIN=%APP_DIR%\.venv\Scripts\python.exe"
-)
-
-set "PYTHONWARNINGS=ignore"
-set "BACKEND_PORT=8000"
-set "BACKEND_HOST=127.0.0.1"
-
-if not exist "%APP_DIR%\frontend\package.json" (
-	echo [ERROR] Cannot find frontend\package.json under "%APP_DIR%".
-	exit /b 1
-)
-
-cd /d "%APP_DIR%"
-
-if exist "%PYTHON_BIN%" (
-	start "NutriScan Backend" cmd /c ""%PYTHON_BIN%" -m uvicorn backend.app:app --reload --host %BACKEND_HOST% --port %BACKEND_PORT%"
-) else (
-	echo [WARN] Backend server was not started because Python was not found.
-)
-
-cd /d "%APP_DIR%\frontend"
+REM Change to frontend directory
+cd /d "C:\Users\twrsh\OneDrive\Attachments\NutriScan\frontend"
 
 REM Start dev server on port 3000 (default)
 echo ============================================================

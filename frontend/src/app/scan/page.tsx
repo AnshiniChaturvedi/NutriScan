@@ -1,8 +1,7 @@
+'use client';
 import dynamic from 'next/dynamic';
 import Navbar from '@/components/Navbar';
 import { Scan } from 'lucide-react';
-
-export const metadata = { title: 'Scan Product – NutriScan AI' };
 
 const BarcodeScanner = dynamic(() => import('@/components/BarcodeScanner'), {
   ssr: false,
