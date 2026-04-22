@@ -13,6 +13,11 @@ echo ============================================================
 echo.
 echo Python executable: %PYTHON_BIN%
 echo Frontend directory: %cd%
+echo Backend host: %BACKEND_HOST%:%BACKEND_PORT%
+if not exist "%PYTHON_BIN%" (
+	echo [WARN] Python venv executable not found at configured path.
+	echo [WARN] ML routes may fail until a valid venv is available.
+)
 echo.
 echo The app will be available at:
 echo   http://localhost:3000
@@ -21,4 +26,6 @@ echo Note: First request may be slower due to OCR model loading (30-60s).
 echo Press Ctrl+C to stop the server.
 echo ============================================================
 echo.
-npm run dev
+npm run dev -- --hostname 0.0.0.0
+
+endlocal

@@ -14,10 +14,22 @@ class Settings(BaseSettings):
 
     # General
     ENV: str = "development"
-    DEBUG: bool = True
+    DEBUG: bool = False
+
+    # Comma-separated list of allowed CORS origins
+    CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
 
     # External APIs
     OPENFOODFACTS_BASE_URL: str = "https://world.openfoodfacts.org/api/v0"
+
+    # Database
+    DATABASE_PATH: str = "data/nutriscan.db"
+
+    # Authentication
+    JWT_SECRET_KEY: str = "change-this-secret-in-production"
+    JWT_ISSUER: str = "nutriscan-ai"
+    JWT_AUDIENCE: str = "nutriscan-users"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7
 
     # LLM / Gemini
     GEMINI_API_KEY: Optional[str] = None
