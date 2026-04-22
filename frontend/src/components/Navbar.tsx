@@ -4,9 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Scan, Menu, X, Zap, LogOut } from 'lucide-react';
-
-import { useAuth } from '@/components/AuthProvider';
+import { Scan, Menu, X, Zap } from 'lucide-react';
 
 export default function Navbar() {
   const [scrolled, setScrolled]   = useState(false);
@@ -21,8 +19,12 @@ export default function Navbar() {
   }, []);
 
   const links = [
-    { href: '/',       label: 'Home' },
-    { href: '/scan',   label: 'Scan Food' },
+    { href: '/', label: 'Home' },
+    { href: '/scan', label: 'Scan Food' },
+    { href: '/dashboard', label: 'Dashboard' },
+    { href: '/history', label: 'History' },
+    { href: '/pricing', label: 'Pricing' },
+    { href: '/faq', label: 'FAQ' },
   ];
 
   const authLinks = user
@@ -106,11 +108,11 @@ export default function Navbar() {
             )}
 
             <Link
-              href="/scan"
-              className="ml-3 flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-brand-green to-emerald-400 text-black font-semibold text-sm shadow-glow hover:shadow-[0_0_50px_rgba(34,197,94,0.4)] transition-all duration-300 hover:scale-105"
+              href="/login"
+              className="ml-3 flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-brand-green to-emerald-400 text-black font-semibold text-sm shadow-glow transition-all duration-300"
             >
               <Scan className="w-4 h-4" />
-              Start Scanning
+              Account
             </Link>
           </div>
 
@@ -181,12 +183,12 @@ export default function Navbar() {
             )}
 
             <Link
-              href="/scan"
+              href="/login"
               onClick={() => setMobileOpen(false)}
               className="flex items-center justify-center gap-2 mt-2 px-4 py-3 rounded-xl bg-gradient-to-r from-brand-green to-emerald-400 text-black font-semibold text-sm"
             >
               <Scan className="w-4 h-4" />
-              Start Scanning
+              Account
             </Link>
           </motion.div>
         )}
