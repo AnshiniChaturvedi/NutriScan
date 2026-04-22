@@ -11,23 +11,24 @@ type MenuItem = {
 
 export function StaggeredMenu({
   isOpen,
-  onToggle,
   onClose,
   onGoHome,
   onGoScan,
+  onGoDashboard,
+  onGoPricing,
+  onGoFaq,
 }: {
   isOpen: boolean;
-  onToggle: () => void;
   onClose: () => void;
   onGoHome: () => void;
   onGoScan: () => void;
+  onGoDashboard: () => void;
+  onGoPricing: () => void;
+  onGoFaq: () => void;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
-  const layersRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const itemsRef = useRef<HTMLDivElement>(null);
-  const menuTextWrapRef = useRef<HTMLDivElement>(null);
-  const plusRef = useRef<HTMLDivElement>(null);
 
   const tl = useRef<gsap.core.Timeline | null>(null);
 
@@ -35,33 +36,26 @@ export function StaggeredMenu({
     () => [
       { label: 'Home', action: () => (onClose(), onGoHome()) },
       { label: 'Scan', action: () => (onClose(), onGoScan()) },
+      { label: 'Dashboard', action: () => (onClose(), onGoDashboard()) },
+      { label: 'Pricing', action: () => (onClose(), onGoPricing()) },
+      { label: 'FAQ', action: () => (onClose(), onGoFaq()) },
     ],
-    [onClose, onGoHome, onGoScan]
+    [onClose, onGoHome, onGoScan, onGoDashboard, onGoPricing, onGoFaq]
   );
 
   useEffect(() => {
     const root = rootRef.current;
-    const layers = layersRef.current;
     const panel = panelRef.current;
     const itemsEl = itemsRef.current;
-    const menuTextWrap = menuTextWrapRef.current;
-    const plus = plusRef.current;
-    if (!root || !layers || !panel || !itemsEl || !menuTextWrap || !plus) return;
+    if (!root || !panel || !itemsEl) return;
 
-    gsap.set([layers, panel], { xPercent: 100 });
+    gsap.set(panel, { xPercent: 100 });
     gsap.set(panel, { boxShadow: '0 30px 80px rgba(0,0,0,0.45)' });
     gsap.set(itemsEl.querySelectorAll('[data-menu-item]'), { yPercent: 140, rotate: 10, opacity: 1 });
 
     tl.current?.kill();
     tl.current = gsap
       .timeline({ paused: true })
-      .to(menuTextWrap, { yPercent: -50, duration: 0.6, ease: 'power3.inOut' }, 0)
-      .to(plus, { rotate: 225, duration: 0.6, ease: 'power3.inOut' }, 0)
-      .to(
-        layers.querySelectorAll('[data-layer]'),
-        { xPercent: 0, duration: 0.9, ease: 'power3.inOut', stagger: 0.06 },
-        0
-      )
       .to(panel, { xPercent: 0, duration: 0.9, ease: 'power3.inOut' }, 0.12)
       .to(
         itemsEl.querySelectorAll('[data-menu-item]'),
@@ -99,43 +93,8 @@ export function StaggeredMenu({
         style={{ background: 'transparent' }}
       />
 
-      {/* Toggle button */}
-      <div className="absolute top-6 right-6 pointer-events-auto">
-        <button
-          type="button"
-          onClick={onToggle}
-          className={[
-            'staggered-menu__toggle',
-            isOpen ? 'staggered-menu__toggle--shifted' : '',
-            'relative flex items-center gap-3 rounded-2xl px-5 py-4 backdrop-blur-[120px] bg-white/5 border border-white/10',
-            'uppercase tracking-[0.3em] text-[11px] text-white select-none',
-          ].join(' ')}
-        >
-          <div className="h-[14px] overflow-hidden">
-            <div ref={menuTextWrapRef} className="flex flex-col">
-              <span className="h-[14px] leading-[14px]">Menu</span>
-              <span className="h-[14px] leading-[14px]">Close</span>
-            </div>
-          </div>
-          <div
-            ref={plusRef}
-            className="w-5 h-5 grid place-items-center text-white/90"
-            style={{ transformOrigin: '50% 50%' }}
-          >
-            <span className="block w-3.5 h-[1px] bg-white/90" />
-            <span className="block w-[1px] h-3.5 bg-white/90 -mt-[7px]" />
-          </div>
-        </button>
-      </div>
-
       {/* Slide layers + main panel */}
       <div className="absolute top-0 right-0 h-full flex pointer-events-none">
-        <div ref={layersRef} className="absolute top-0 right-0 h-full w-full">
-          <div data-layer className="absolute top-0 right-0 h-full w-[140%] opacity-30" style={{ background: 'var(--accent)' }} />
-          <div data-layer className="absolute top-0 right-0 h-full w-[140%] opacity-30" style={{ background: 'var(--accent-2)' }} />
-          <div data-layer className="absolute top-0 right-0 h-full w-[140%] opacity-30" style={{ background: 'var(--accent-3)' }} />
-        </div>
-
         <aside
           ref={panelRef}
           className="staggered-menu__panel relative h-full bg-white text-black pointer-events-auto"
