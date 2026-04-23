@@ -1,0 +1,11 @@
+{
+  "added_sugar": ["sugar", "sucrose", "glucose", "fructose", "dextrose", "corn syrup", "high fructose corn syrup", "invert sugar", "maltose", "cane sugar"],
+  "artificial_color": ["red 40", "yellow 5", "yellow 6", "blue 1", "caramel color", "colour", "color", "annatto"],
+  "preservative": ["sodium benzoate", "potassium sorbate", "sulfite", "nitrite", "nitrate", "tbhq", "bht", "bha"],
+  "emulsifier": ["lecithin", "mono and diglycerides", "mono- and diglycerides", "polysorbate", "emulsifier"],
+  "artificial_flavor": ["artificial flavor", "artificial flavour", "flavoring", "flavouring", "vanillin"],
+  "caffeine": ["caffeine", "coffee", "guarana", "green tea extract", "cola nut"],
+  "palm_oil": ["palm oil", "palm kernel oil", "palm fat"],
+  "natural_protein_source": ["whey", "soy", "pea protein", "lentils", "chickpeas", "egg", "milk protein", "casein"],
+  "fiber_source": ["fiber", "fibre", "psyllium", "inulin", "oat fiber", "chia", "flaxseed", "whole grain"]
+}

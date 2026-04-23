@@ -1,0 +1,108 @@
+.staggered-menu__toggle {
+  transition: transform 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.staggered-menu__toggle--shifted {
+  transform: translateX(calc(-1 * clamp(260px, 38vw, 420px)));
+}
+
+.staggered-menu__panel {
+  width: clamp(260px, 38vw, 420px);
+  background: linear-gradient(165deg, rgba(9, 14, 21, 0.94), rgba(12, 24, 20, 0.9));
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(14px);
+}
+
+@media (max-width: 1024px) {
+  .staggered-menu__panel {
+    width: 100vw;
+  }
+}
+
+.staggered-menu__items {
+  counter-reset: menu-counter;
+  margin-top: 1.75rem;
+}
+
+.staggered-menu__item {
+  counter-increment: menu-counter;
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  line-height: 1;
+  transition: transform 0.28s ease, opacity 0.28s ease;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.staggered-menu__item:hover {
+  transform: translateX(8px);
+  opacity: 0.7;
+}
+
+.staggered-menu__item::before {
+  content: counter(menu-counter, decimal-leading-zero);
+  font-size: 0.75rem;
+  letter-spacing: 0.3em;
+  color: var(--accent);
+  display: inline-block;
+  width: 3.5rem;
+  transform: none;
+  opacity: 0.9;
+  flex-shrink: 0;
+  line-height: 1;
+  padding-top: 0.32rem;
+}
+
+.staggered-menu__social-link {
+  color: rgba(255, 255, 255, 0.72);
+  transition: opacity 0.2s ease;
+}
+
+.staggered-menu__social-link:hover {
+  opacity: 0.6;
+}
+
+.staggered-menu__topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.staggered-menu__eyebrow {
+  font-size: 0.68rem;
+  letter-spacing: 0.22em;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.staggered-menu__close-btn {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 9999px;
+  padding: 0.4rem 0.85rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.88);
+  transition: background-color 0.22s ease, color 0.22s ease;
+}
+
+.staggered-menu__close-btn:hover {
+  background-color: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+.staggered-menu__hero {
+  margin-top: 1rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: fit-content;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  padding: 0.45rem 0.8rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.9);
+}
+
