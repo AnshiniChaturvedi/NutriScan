@@ -1,10 +1,16 @@
 @echo off
+setlocal
+
+REM Resolve project root from this script location
+set "PROJECT_ROOT=%~dp0"
+if "%PROJECT_ROOT:~-1%"=="\" set "PROJECT_ROOT=%PROJECT_ROOT:~0,-1%"
+
 REM Set Python binary path for ML bridge
-set PYTHON_BIN=C:\Users\twrsh\OneDrive\Attachments\NutriScan\.venv\Scripts\python.exe
+set "PYTHON_BIN=%PROJECT_ROOT%\.venv\Scripts\python.exe"
 set PYTHONWARNINGS=ignore
 
 REM Change to frontend directory
-cd /d "C:\Users\twrsh\OneDrive\Attachments\NutriScan\frontend"
+cd /d "%PROJECT_ROOT%\frontend"
 
 REM Start dev server on port 3000 (default)
 echo ============================================================
