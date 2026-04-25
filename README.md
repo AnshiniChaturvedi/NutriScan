@@ -4,11 +4,11 @@
 
 <img src="https://readme-typing-svg.demolab.com?font=Fira+Code&size=18&pause=900&color=22C55E&center=true&vCenter=true&width=700&lines=Scan+food+products+in+seconds;Get+health+scores+%2B+risk+insights;Powered+by+Next.js+%2B+FastAPI+%2B+ML" alt="NutriScan animated header" />
 
-<p>
+<!-- <p>
   <img src="https://img.shields.io/badge/Next.js-Frontend-111827?style=for-the-badge&logo=nextdotjs" alt="Next.js" />
   <img src="https://img.shields.io/badge/FastAPI-Backend-059669?style=for-the-badge&logo=fastapi" alt="FastAPI" />
   <img src="https://img.shields.io/badge/ML-Scikit--learn%20%7C%20XGBoost-F59E0B?style=for-the-badge" alt="ML" />
-</p>
+</p> -->
 
 </div>
 
