@@ -45,6 +45,7 @@ def _parse_product_dict(barcode: str, product: dict) -> ProductDetails:
         "saturated_fat_100g": float(nutriments.get("saturated-fat_100g") or 0.0),
         "salt_100g":          float(nutriments.get("salt_100g") or 0.0),
         "fiber_100g":         float(fiber_val),
+        "proteins_100g":      float(nutriments.get("proteins_100g") or 0.0),
         "additives_count":    float(product.get("additives_n") or 0.0),
         "energy_kcal":        energy_kcal,
         "nova_group":         float(product.get("nova_group") or 0.0),

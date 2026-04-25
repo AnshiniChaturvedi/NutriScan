@@ -20,7 +20,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-
 OFF_PRODUCT_URL = "https://world.openfoodfacts.org/api/v0/product/{barcode}.json"
 OFF_PRODUCT_URLS = [
     "https://world.openfoodfacts.org/api/v0/product/{barcode}.json",
@@ -144,7 +143,8 @@ def _enrich_nutriments_with_load(
     package_size_g = _parse_mass_to_grams(quantity_text)
     serving_size_g = _parse_mass_to_grams(serving_text)
 
-    # Use full package when known (user expectation), otherwise serving size, then default 100g.
+    # When size is unknown, default to 100g but flag it so consumers can caveat.
+    size_known = bool(package_size_g or serving_size_g)
     consumption_basis_g = package_size_g or serving_size_g or 100.0
     factor = float(np.clip(consumption_basis_g / 100.0, 0.1, 50.0))
 
@@ -153,6 +153,7 @@ def _enrich_nutriments_with_load(
     sat_fat_100g = _safe_float(nutriments.get("saturated_fat_100g"))
     salt_100g = _safe_float(nutriments.get("salt_100g"))
     fiber_100g = _safe_float(nutriments.get("fiber_100g"))
+    protein_100g = _safe_float(nutriments.get("proteins_100g"))
     energy_100g = _safe_float(nutriments.get("energy_kcal"))
 
     enriched = dict(nutriments)
@@ -161,11 +162,13 @@ def _enrich_nutriments_with_load(
             "package_size_g": round(package_size_g, 2) if package_size_g else 0.0,
             "serving_size_g": round(serving_size_g, 2) if serving_size_g else 0.0,
             "consumption_basis_g": round(consumption_basis_g, 2),
+            "serving_basis_estimated": int(not size_known),
             "sugar_total_g": round(sugar_100g * factor, 2),
             "fat_total_g": round(fat_100g * factor, 2),
             "saturated_fat_total_g": round(sat_fat_100g * factor, 2),
             "salt_total_g": round(salt_100g * factor, 2),
             "fiber_total_g": round(fiber_100g * factor, 2),
+            "protein_total_g": round(protein_100g * factor, 2),
             "energy_total_kcal": round(energy_100g * factor, 2),
         }
     )
@@ -226,6 +229,7 @@ def _parse_off_product(product: Dict[str, Any], fallback_code: str = "") -> Dict
         "saturated_fat_100g": _safe_float(nutriments.get("saturated-fat_100g")),
         "salt_100g": _safe_float(nutriments.get("salt_100g")),
         "fiber_100g": _safe_float(nutriments.get("fiber_100g") or nutriments.get("fibers_100g")),
+        "proteins_100g": _safe_float(nutriments.get("proteins_100g")),
         "additives_count": _safe_float(product.get("additives_n")),
         "energy_kcal": _to_energy_kcal(nutriments),
         "nova_group": _safe_float(product.get("nova_group")),
@@ -324,6 +328,7 @@ def _local_row_to_product(row: pd.Series, fallback_code: str = "") -> Dict[str, 
         "saturated_fat_100g": _safe_float(row.get("saturated_fat_100g")),
         "salt_100g": _safe_float(row.get("salt_100g")),
         "fiber_100g": _safe_float(row.get("fiber_100g")),
+        "proteins_100g": _safe_float(row.get("proteins_100g")),
         "additives_count": _safe_float(row.get("additives_n")),
         "energy_kcal": _safe_float(row.get("energy_kcal_100g")),
         "nova_group": _safe_float(row.get("nova_group")),
@@ -615,7 +620,7 @@ def _ml_vector(nutriments: Dict[str, float]) -> pd.DataFrame:
         "sugars_100g": _safe_float(nutriments.get("sugar_100g")),
         "salt_100g": _safe_float(nutriments.get("salt_100g")),
         "fiber_100g": _safe_float(nutriments.get("fiber_100g")),
-        "proteins_100g": 0.0,
+        "proteins_100g": _safe_float(nutriments.get("proteins_100g")),
         "additives_n": _safe_float(nutriments.get("additives_count")),
         "nova_group": _safe_float(nutriments.get("nova_group")),
     }
