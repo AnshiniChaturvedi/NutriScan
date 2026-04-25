@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .routes.auth import router as auth_router
+from .routes.ml import router as ml_router
 from .services.database import initialize_database
 
 
@@ -10,16 +11,14 @@ def create_app() -> FastAPI:
     """
     Application factory for NutriScan AI backend.
     
-    NOTE: The modern ML pipeline is now integrated into the Next.js frontend
-    via the ML bridge (frontend_infer.py). This backend serves as a fallback
-    for system information and can be extended for future microservices.
+    FastAPI application for auth plus ML inference endpoints.
     """
     settings = get_settings()
 
     app = FastAPI(
         title="NutriScan AI Backend",
         version="0.2.0",
-        description="Backend infrastructure for NutriScan AI (ML pipeline is now in the frontend).",
+        description="Backend infrastructure for NutriScan AI.",
         docs_url="/docs" if settings.DEBUG else None,
         redoc_url="/redoc" if settings.DEBUG else None,
     )
@@ -44,6 +43,7 @@ def create_app() -> FastAPI:
         """Basic health check endpoint."""
         return {"status": "ok", "service": "nutriscan-ai-backend"}
 
+    app.include_router(ml_router)
     app.include_router(auth_router)
 
     return app
