@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { runMlBridge } from '@/lib/mlBridge';
+const BACKEND_URL =
+  process.env.NUTRISCAN_BACKEND_URL ??
+  process.env.NEXT_PUBLIC_BACKEND_URL ??
+  process.env.NEXT_PUBLIC_API_URL ??
+  'http://127.0.0.1:8000';
 
 function mapBridgeErrorStatus(errorType: string, message: string): number {
   const t = errorType.toLowerCase();
@@ -36,15 +40,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid barcode format. Expected 8 to 14 digits.' }, { status: 422 });
     }
 
-    const product = await runMlBridge(['scan', '--barcode', barcode]);
-    if (product && typeof product === 'object' && 'error' in product) {
-      const payload = product as { error?: string; error_type?: string };
-      const message = String(payload.error || 'Scan failed');
-      const errorType = String(payload.error_type || 'bridge_error');
-      const status = mapBridgeErrorStatus(errorType, message);
-      return NextResponse.json({ error: message, error_type: errorType }, { status });
+    const backendResponse = await fetch(`${BACKEND_URL}/scan-product`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ barcode }),
+    });
+    const payload = (await backendResponse.json().catch(() => ({}))) as Record<string, unknown>;
+
+    if (!backendResponse.ok) {
+      const message = String(payload.detail || payload.error || 'Scan failed');
+      const status = mapBridgeErrorStatus('backend_error', message);
+      return NextResponse.json({ error: message, error_type: 'backend_error' }, { status });
     }
-    return NextResponse.json(product);
+    return NextResponse.json(payload);
   } catch (err) {
     return NextResponse.json({ error: `Scan failed: ${String(err)}` }, { status: 500 });
   }
