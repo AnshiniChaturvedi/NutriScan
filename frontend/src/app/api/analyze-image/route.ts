@@ -1,16 +1,14 @@
-import { randomUUID } from 'node:crypto';
-import { unlink, writeFile } from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
-
 import { NextRequest, NextResponse } from 'next/server';
 
-import { runMlBridge } from '@/lib/mlBridge';
+const BACKEND_URL =
+  process.env.NUTRISCAN_BACKEND_URL ??
+  process.env.NEXT_PUBLIC_BACKEND_URL ??
+  process.env.NEXT_PUBLIC_API_URL ??
+  'http://127.0.0.1:8000';
 
 export const runtime = 'nodejs';
 
 export async function POST(req: NextRequest) {
-  let tempPath = '';
   try {
     const form = await req.formData();
     const image = form.get('image');
@@ -44,25 +42,21 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const bytes = Buffer.from(await image.arrayBuffer());
-    tempPath = path.join(os.tmpdir(), `nutriscan-${randomUUID()}${ext}`);
-    await writeFile(tempPath, bytes);
+    const backendForm = new FormData();
+    backendForm.append('image', image);
 
-    const result = await runMlBridge(['analyze-image', '--image', tempPath]);
-    if (result && typeof result === 'object' && 'error' in result) {
-      const message = String((result as { error?: string }).error || 'Image analysis failed');
-      return NextResponse.json({ detail: message }, { status: 422 });
+    const backendResponse = await fetch(`${BACKEND_URL}/analyze-image`, {
+      method: 'POST',
+      body: backendForm,
+    });
+    const payload = (await backendResponse.json().catch(() => ({}))) as Record<string, unknown>;
+
+    if (!backendResponse.ok) {
+      const message = String(payload.detail || payload.error || 'Image analysis failed');
+      return NextResponse.json({ detail: message }, { status: backendResponse.status || 422 });
     }
-    return NextResponse.json(result);
+    return NextResponse.json(payload);
   } catch (err) {
     return NextResponse.json({ detail: `Image analysis failed: ${String(err)}` }, { status: 500 });
-  } finally {
-    if (tempPath) {
-      try {
-        await unlink(tempPath);
-      } catch {
-        // Best effort cleanup.
-      }
-    }
   }
 }
