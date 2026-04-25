@@ -1,7 +1,7 @@
 import axios from 'axios';
 import type { AnalyzeResponse, Product, RecommendationItem } from './types';
 
-// Frontend calls local Next.js API routes, which bridge directly to Python ML.
+// Frontend calls local Next.js API routes, which proxy to FastAPI backend ML endpoints.
 const BASE_URL = '';
 
 const api = axios.create({
