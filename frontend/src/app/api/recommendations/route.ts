@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { runMlBridge } from '@/lib/mlBridge';
+const BACKEND_URL =
+  process.env.NUTRISCAN_BACKEND_URL ??
+  process.env.NEXT_PUBLIC_BACKEND_URL ??
+  process.env.NEXT_PUBLIC_API_URL ??
+  'http://127.0.0.1:8000';
 
 type RecommendationRaw = {
   product?: {
@@ -72,7 +76,16 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid barcode format. Expected 8 to 14 digits.' }, { status: 422 });
     }
 
-    const result = await runMlBridge(['recommend', '--barcode', barcode, '--limit', '4']);
+    const backendResponse = await fetch(
+      `${BACKEND_URL}/recommendations?barcode=${encodeURIComponent(barcode)}`,
+      { method: 'GET' },
+    );
+
+    if (!backendResponse.ok) {
+      return NextResponse.json([], { status: 200 });
+    }
+
+    const result = await backendResponse.json().catch(() => []);
     if (!Array.isArray(result)) {
       return NextResponse.json([], { status: 200 });
     }
