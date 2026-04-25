@@ -4,7 +4,9 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Scan, Menu, X, Zap } from 'lucide-react';
+import { Scan, Menu, X, Zap, LogOut } from 'lucide-react';
+
+import { useAuth } from '@/components/AuthProvider';
 
 export default function Navbar() {
   const [scrolled, setScrolled]   = useState(false);
