@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { runMlBridge } from '@/lib/mlBridge';
+const BACKEND_URL =
+  process.env.NUTRISCAN_BACKEND_URL ??
+  process.env.NEXT_PUBLIC_BACKEND_URL ??
+  process.env.NEXT_PUBLIC_API_URL ??
+  'http://127.0.0.1:8000';
 
 function mapBridgeErrorStatus(errorType: string, message: string): number {
   const t = errorType.toLowerCase();
@@ -41,23 +45,24 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Product name must be between 2 and 120 characters.' }, { status: 422 });
     }
 
-    const args = ['analyze'];
-    if (barcode) {
-      args.push('--barcode', barcode);
-    }
-    if (productName) {
-      args.push('--product-name', productName);
-    }
+    const backendBody = JSON.stringify({
+      ...(barcode ? { barcode } : {}),
+      ...(productName ? { product_name: productName } : {}),
+    });
 
-    const result = await runMlBridge(args);
-    if (result && typeof result === 'object' && 'error' in result) {
-      const payload = result as { error?: string; error_type?: string };
-      const message = String(payload.error || 'Analysis failed');
-      const errorType = String(payload.error_type || 'bridge_error');
-      const status = mapBridgeErrorStatus(errorType, message);
-      return NextResponse.json({ error: message, error_type: errorType }, { status });
+    const backendResponse = await fetch(`${BACKEND_URL}/analyze-food`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: backendBody,
+    });
+    const payload = (await backendResponse.json().catch(() => ({}))) as Record<string, unknown>;
+
+    if (!backendResponse.ok) {
+      const message = String(payload.detail || payload.error || 'Analysis failed');
+      const status = mapBridgeErrorStatus('backend_error', message);
+      return NextResponse.json({ error: message, error_type: 'backend_error' }, { status });
     }
-    return NextResponse.json(result);
+    return NextResponse.json(payload);
   } catch (err) {
     return NextResponse.json({ error: `Analyze failed: ${String(err)}` }, { status: 500 });
   }
