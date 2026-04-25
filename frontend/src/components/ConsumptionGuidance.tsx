@@ -10,6 +10,8 @@ interface ConsumptionGuidanceProps {
 
 export default function ConsumptionGuidance({ data }: ConsumptionGuidanceProps) {
   const hasWarnings = data.specific_warnings && data.specific_warnings.trim().length > 0;
+  const highlights = Array.isArray(data.highlights) ? data.highlights.filter(Boolean) : [];
+  const hasHighlights = highlights.length > 0;
 
   return (
     <motion.div
@@ -56,6 +58,25 @@ export default function ConsumptionGuidance({ data }: ConsumptionGuidanceProps) 
               Specific Warnings
             </p>
             <p className="text-slate-300 text-sm leading-relaxed">{data.specific_warnings}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Intake Highlights */}
+      {hasHighlights && (
+        <div className="rounded-xl p-4 bg-red-500/10 border border-red-400/30">
+          <div className="flex items-center gap-2 mb-2">
+            <AlertTriangle size={16} className="text-red-300" />
+            <p className="text-xs font-semibold text-red-300 uppercase tracking-wide">
+              High Intake Highlights
+            </p>
+          </div>
+          <div className="space-y-2">
+            {highlights.map((item, index) => (
+              <p key={`${item}-${index}`} className="text-sm text-red-100/90 leading-relaxed">
+                {`⚠️ ${item}`}
+              </p>
+            ))}
           </div>
         </div>
       )}

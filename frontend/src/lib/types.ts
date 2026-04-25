@@ -33,6 +33,7 @@ export interface ConsumptionDisclaimer {
   general_guidance: string;
   specific_warnings: string;
   disclaimer: string;
+  highlights?: string[];
 }
 
 export interface AnalyzeResponse {

@@ -93,6 +93,85 @@ def _safe_float(v: Any) -> float:
         return 0.0
 
 
+def _parse_mass_to_grams(text: Optional[str]) -> Optional[float]:
+    """
+    Parse common quantity formats (g, kg, ml, l, cl) into grams.
+    For liquids, ml is approximated as grams for consumer-friendly load estimates.
+    """
+    raw = (text or "").strip().lower()
+    if not raw:
+        return None
+
+    normalized = raw.replace(",", ".")
+
+    multi = re.search(r"(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*(kg|g|l|ml|cl)\b", normalized)
+    if multi:
+        count = _safe_float(multi.group(1))
+        amount = _safe_float(multi.group(2))
+        unit = multi.group(3)
+        unit_factor = {
+            "g": 1.0,
+            "kg": 1000.0,
+            "ml": 1.0,
+            "cl": 10.0,
+            "l": 1000.0,
+        }.get(unit, 0.0)
+        grams = count * amount * unit_factor
+        return grams if grams > 0 else None
+
+    single = re.search(r"(\d+(?:\.\d+)?)\s*(kg|g|l|ml|cl)\b", normalized)
+    if single:
+        amount = _safe_float(single.group(1))
+        unit = single.group(2)
+        unit_factor = {
+            "g": 1.0,
+            "kg": 1000.0,
+            "ml": 1.0,
+            "cl": 10.0,
+            "l": 1000.0,
+        }.get(unit, 0.0)
+        grams = amount * unit_factor
+        return grams if grams > 0 else None
+
+    return None
+
+
+def _enrich_nutriments_with_load(
+    nutriments: Dict[str, float],
+    quantity_text: Optional[str],
+    serving_text: Optional[str],
+) -> Dict[str, float]:
+    package_size_g = _parse_mass_to_grams(quantity_text)
+    serving_size_g = _parse_mass_to_grams(serving_text)
+
+    # Use full package when known (user expectation), otherwise serving size, then default 100g.
+    consumption_basis_g = package_size_g or serving_size_g or 100.0
+    factor = float(np.clip(consumption_basis_g / 100.0, 0.1, 50.0))
+
+    sugar_100g = _safe_float(nutriments.get("sugar_100g"))
+    fat_100g = _safe_float(nutriments.get("fat_100g"))
+    sat_fat_100g = _safe_float(nutriments.get("saturated_fat_100g"))
+    salt_100g = _safe_float(nutriments.get("salt_100g"))
+    fiber_100g = _safe_float(nutriments.get("fiber_100g"))
+    energy_100g = _safe_float(nutriments.get("energy_kcal"))
+
+    enriched = dict(nutriments)
+    enriched.update(
+        {
+            "package_size_g": round(package_size_g, 2) if package_size_g else 0.0,
+            "serving_size_g": round(serving_size_g, 2) if serving_size_g else 0.0,
+            "consumption_basis_g": round(consumption_basis_g, 2),
+            "sugar_total_g": round(sugar_100g * factor, 2),
+            "fat_total_g": round(fat_100g * factor, 2),
+            "saturated_fat_total_g": round(sat_fat_100g * factor, 2),
+            "salt_total_g": round(salt_100g * factor, 2),
+            "fiber_total_g": round(fiber_100g * factor, 2),
+            "energy_total_kcal": round(energy_100g * factor, 2),
+        }
+    )
+    return enriched
+
+
 def _contains_palm_oil(ingredients_text: Optional[str]) -> bool:
     text = (ingredients_text or "").lower()
     if not text:
@@ -151,6 +230,11 @@ def _parse_off_product(product: Dict[str, Any], fallback_code: str = "") -> Dict
         "energy_kcal": _to_energy_kcal(nutriments),
         "nova_group": _safe_float(product.get("nova_group")),
     }
+    normalized = _enrich_nutriments_with_load(
+        normalized,
+        quantity_text=_safe_text(product.get("quantity")),
+        serving_text=_safe_text(product.get("serving_size")),
+    )
 
     brand_raw = (product.get("brands") or "").strip()
     brand = brand_raw.split(",")[0].strip() if brand_raw else None
@@ -244,6 +328,7 @@ def _local_row_to_product(row: pd.Series, fallback_code: str = "") -> Dict[str, 
         "energy_kcal": _safe_float(row.get("energy_kcal_100g")),
         "nova_group": _safe_float(row.get("nova_group")),
     }
+    nutriments = _enrich_nutriments_with_load(nutriments, quantity_text=None, serving_text=None)
     return {
         "barcode": code,
         "product_name": _safe_text(row.get("product_name")),
@@ -352,7 +437,7 @@ def search_by_name(name: str, page_size: int = 15) -> List[Dict[str, Any]]:
         "action": "process",
         "json": 1,
         "page_size": page_size,
-        "fields": "code,product_name,brands,image_url,image_front_url,image_small_url,ingredients_text,nutriments,additives_n,nova_group",
+        "fields": "code,product_name,brands,image_url,image_front_url,image_small_url,ingredients_text,nutriments,additives_n,nova_group,quantity,serving_size",
     }
     out: List[Dict[str, Any]] = []
     for url in OFF_SEARCH_URLS:
@@ -607,7 +692,7 @@ def _clamp_ratio(value: float, low: float, high: float) -> float:
 
 
 def _derive_nutrient_quality_score(nutriments: Dict[str, float]) -> float:
-    # Penalty thresholds are per 100g and intentionally conservative.
+    # Density signals (per 100g) are blended with consumed load (pack-level when available).
     sugar = _safe_float(nutriments.get("sugar_100g"))
     saturated_fat = _safe_float(nutriments.get("saturated_fat_100g"))
     salt = _safe_float(nutriments.get("salt_100g"))
@@ -621,6 +706,18 @@ def _derive_nutrient_quality_score(nutriments: Dict[str, float]) -> float:
     salt_pen = _clamp_ratio(salt, 0.3, 2.0)
     energy_pen = _clamp_ratio(energy, 120.0, 520.0)
     fat_pen = _clamp_ratio(fat, 3.0, 25.0)
+
+    sugar_total_pen = _clamp_ratio(_safe_float(nutriments.get("sugar_total_g")), 15.0, 60.0)
+    sat_fat_total_pen = _clamp_ratio(_safe_float(nutriments.get("saturated_fat_total_g")), 4.0, 24.0)
+    salt_total_pen = _clamp_ratio(_safe_float(nutriments.get("salt_total_g")), 1.5, 6.0)
+    energy_total_pen = _clamp_ratio(_safe_float(nutriments.get("energy_total_kcal")), 250.0, 1200.0)
+    fat_total_pen = _clamp_ratio(_safe_float(nutriments.get("fat_total_g")), 8.0, 50.0)
+
+    sugar_pen = (sugar_pen * 0.55) + (sugar_total_pen * 0.45)
+    sat_fat_pen = (sat_fat_pen * 0.55) + (sat_fat_total_pen * 0.45)
+    salt_pen = (salt_pen * 0.55) + (salt_total_pen * 0.45)
+    energy_pen = (energy_pen * 0.55) + (energy_total_pen * 0.45)
+    fat_pen = (fat_pen * 0.55) + (fat_total_pen * 0.45)
     additives_pen = _clamp_ratio(additives, 0.0, 8.0)
 
     # Fiber bonus improves score but cannot fully offset heavy penalties.
@@ -682,9 +779,13 @@ def _derive_health_score(
 
     # Apply targeted penalties so clearly unhealthy profiles cannot remain over-scored.
     sugar = _safe_float(nutriments.get("sugar_100g"))
+    sugar_total = _safe_float(nutriments.get("sugar_total_g"))
     saturated_fat = _safe_float(nutriments.get("saturated_fat_100g"))
+    saturated_fat_total = _safe_float(nutriments.get("saturated_fat_total_g"))
     salt = _safe_float(nutriments.get("salt_100g"))
+    salt_total = _safe_float(nutriments.get("salt_total_g"))
     energy = _safe_float(nutriments.get("energy_kcal"))
+    energy_total = _safe_float(nutriments.get("energy_total_kcal"))
     additives = _safe_float(nutriments.get("additives_count"))
 
     harmful_ml_signal = (
@@ -700,12 +801,20 @@ def _derive_health_score(
         risk_penalty += 12.0
     if sugar >= 12.0:
         risk_penalty += 8.0
+    if sugar_total >= 30.0:
+        risk_penalty += 10.0
     if saturated_fat >= 5.0:
+        risk_penalty += 8.0
+    if saturated_fat_total >= 10.0:
         risk_penalty += 8.0
     if salt >= 1.0:
         risk_penalty += 8.0
+    if salt_total >= 2.0:
+        risk_penalty += 8.0
     if energy >= 380.0:
         risk_penalty += 6.0
+    if energy_total >= 650.0:
+        risk_penalty += 8.0
     if additives >= 5.0:
         risk_penalty += 6.0
     if harmful_ml_signal >= 0.45:
@@ -745,22 +854,43 @@ def _derive_disease_risks_from_ml(
     has_palm_oil: bool,
 ) -> Dict[str, Dict[str, float]]:
     sugar = _safe_float(nutriments.get("sugar_100g"))
+    sugar_total = _safe_float(nutriments.get("sugar_total_g"))
     saturated_fat = _safe_float(nutriments.get("saturated_fat_100g"))
+    saturated_fat_total = _safe_float(nutriments.get("saturated_fat_total_g"))
     fat = _safe_float(nutriments.get("fat_100g"))
+    fat_total = _safe_float(nutriments.get("fat_total_g"))
     salt = _safe_float(nutriments.get("salt_100g"))
+    salt_total = _safe_float(nutriments.get("salt_total_g"))
     energy = _safe_float(nutriments.get("energy_kcal"))
+    energy_total = _safe_float(nutriments.get("energy_total_kcal"))
 
-    sugar_signal = _clamp_ratio(sugar, 5.0, 30.0)
-    sat_fat_signal = _clamp_ratio(saturated_fat, 1.5, 10.0)
-    fat_signal = _clamp_ratio(fat, 3.0, 35.0)
-    salt_signal = _clamp_ratio(salt, 0.3, 2.2)
-    energy_signal = _clamp_ratio(energy, 120.0, 600.0)
+    sugar_signal_density = _clamp_ratio(sugar, 5.0, 30.0)
+    sugar_signal_load = _clamp_ratio(sugar_total, 15.0, 55.0)
+    sugar_signal = (sugar_signal_density * 0.45) + (sugar_signal_load * 0.55)
+
+    sat_fat_signal_density = _clamp_ratio(saturated_fat, 1.5, 10.0)
+    sat_fat_signal_load = _clamp_ratio(saturated_fat_total, 4.0, 20.0)
+    sat_fat_signal = (sat_fat_signal_density * 0.45) + (sat_fat_signal_load * 0.55)
+
+    fat_signal_density = _clamp_ratio(fat, 3.0, 35.0)
+    fat_signal_load = _clamp_ratio(fat_total, 10.0, 45.0)
+    fat_signal = (fat_signal_density * 0.45) + (fat_signal_load * 0.55)
+
+    salt_signal_density = _clamp_ratio(salt, 0.3, 2.2)
+    salt_signal_load = _clamp_ratio(salt_total, 1.2, 5.0)
+    salt_signal = (salt_signal_density * 0.45) + (salt_signal_load * 0.55)
+
+    energy_signal_density = _clamp_ratio(energy, 120.0, 600.0)
+    energy_signal_load = _clamp_ratio(energy_total, 250.0, 1100.0)
+    energy_signal = (energy_signal_density * 0.45) + (energy_signal_load * 0.55)
+    sugar_heavy_load = _clamp_ratio(sugar_total, 25.0, 70.0)
 
     diabetes = (
-        (sugar_signal * 0.48)
-        + (_prob(probs, "added_sugar") * 0.32)
-        + (_prob(probs, "artificial_flavor") * 0.10)
-        + (_prob(probs, "emulsifier") * 0.10)
+        (sugar_signal * 0.44)
+        + (sugar_heavy_load * 0.26)
+        + (_prob(probs, "added_sugar") * 0.20)
+        + (_prob(probs, "artificial_flavor") * 0.05)
+        + (_prob(probs, "emulsifier") * 0.05)
     )
     heart = (
         (sat_fat_signal * 0.35)
@@ -770,12 +900,21 @@ def _derive_disease_risks_from_ml(
         + (_prob(probs, "palm_oil") * 0.23)
     )
     obesity = (
-        (sugar_signal * 0.26)
-        + (fat_signal * 0.26)
-        + (energy_signal * 0.26)
-        + (_prob(probs, "added_sugar") * 0.14)
-        + (_prob(probs, "palm_oil") * 0.08)
+        (sugar_signal * 0.30)
+        + (sugar_heavy_load * 0.30)
+        + (fat_signal * 0.14)
+        + (energy_signal * 0.14)
+        + (_prob(probs, "added_sugar") * 0.08)
+        + (_prob(probs, "palm_oil") * 0.04)
     )
+
+    # Guardrails: high absolute sugar load per consumed pack should elevate metabolic risk.
+    if sugar_total >= 30.0:
+        diabetes = max(diabetes, 0.62)
+        obesity = max(obesity, 0.50)
+    if sugar_total >= 40.0:
+        diabetes = max(diabetes, 0.70)
+        obesity = max(obesity, 0.58)
     hypertension = (
         (salt_signal * 0.55)
         + (_prob(probs, "preservative") * 0.25)
@@ -936,7 +1075,55 @@ def _derive_age_group_impacts_from_ml(disease_risks: Dict[str, Dict[str, float]]
     }
 
 
-def _derive_consumption_disclaimer_from_ml(health_score: float) -> Dict[str, str]:
+def _daily_intake_highlights(nutriments: Dict[str, float]) -> List[str]:
+    highlights: List[str] = []
+
+    sugar_total = _safe_float(nutriments.get("sugar_total_g"))
+    salt_total = _safe_float(nutriments.get("salt_total_g"))
+    sat_fat_total = _safe_float(nutriments.get("saturated_fat_total_g"))
+    energy_total = _safe_float(nutriments.get("energy_total_kcal"))
+
+    # Practical daily reference values for adult guidance.
+    daily_sugar_g = 50.0
+    daily_salt_g = 5.0
+    daily_sat_fat_g = 20.0
+    daily_energy_kcal = 2000.0
+
+    def _pct(value: float, ref: float) -> float:
+        if ref <= 0:
+            return 0.0
+        return (value / ref) * 100.0
+
+    sugar_pct = _pct(sugar_total, daily_sugar_g)
+    salt_pct = _pct(salt_total, daily_salt_g)
+    sat_fat_pct = _pct(sat_fat_total, daily_sat_fat_g)
+    energy_pct = _pct(energy_total, daily_energy_kcal)
+
+    if sugar_total > 0 and sugar_pct >= 50.0:
+        highlights.append(
+            f"One pack provides about {round(sugar_pct)}% of daily recommended sugar intake "
+            f"({round(sugar_total, 1)} g sugar)."
+        )
+    if salt_total > 0 and salt_pct >= 40.0:
+        highlights.append(
+            f"One pack provides about {round(salt_pct)}% of daily recommended salt intake "
+            f"({round(salt_total, 2)} g salt)."
+        )
+    if sat_fat_total > 0 and sat_fat_pct >= 40.0:
+        highlights.append(
+            f"One pack provides about {round(sat_fat_pct)}% of daily saturated fat guideline "
+            f"({round(sat_fat_total, 1)} g saturated fat)."
+        )
+    if energy_total > 0 and energy_pct >= 25.0:
+        highlights.append(
+            f"One pack contributes about {round(energy_pct)}% of a 2000 kcal daily energy intake "
+            f"({round(energy_total)} kcal)."
+        )
+
+    return highlights
+
+
+def _derive_consumption_disclaimer_from_ml(health_score: float, nutriments: Dict[str, float]) -> Dict[str, Any]:
     if health_score >= 80:
         freq = "Regular"
         guidance = "Model indicates a relatively safe ingredient profile."
@@ -950,11 +1137,14 @@ def _derive_consumption_disclaimer_from_ml(health_score: float) -> Dict[str, str
         freq = "Rare"
         guidance = "Model indicates high-risk ingredient patterns."
 
+    highlights = _daily_intake_highlights(nutriments)
+
     return {
         "recommended_frequency": freq,
         "general_guidance": guidance,
         "specific_warnings": "Predictions are probabilistic and should be interpreted with serving context.",
         "disclaimer": "Composite estimate based on nutriments, processing level, ML ingredient signals, and disease-risk heuristics.",
+        "highlights": highlights,
     }
 
 
@@ -988,7 +1178,7 @@ def analyze_product(product: Dict[str, Any]) -> Dict[str, Any]:
         "source": "unknown",
     }
     age_group_impacts = _derive_age_group_impacts_from_ml(disease_risks) if disease_risks else {}
-    consumption_disclaimer = _derive_consumption_disclaimer_from_ml(health_score)
+    consumption_disclaimer = _derive_consumption_disclaimer_from_ml(health_score, nutriments)
 
     return {
         "product": product,
